@@ -20,7 +20,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
     private let supabaseURL = "https://kakhzbcuudkrrktkobjs.supabase.co/functions/v1"
     private let realtimeURL = "wss://api.openai.com/v1/realtime"
-    private let model = "gpt-4o-mini-realtime-preview"
+    private let model = "gpt-4o-realtime-preview"
 
     // MARK: - Internal State
 

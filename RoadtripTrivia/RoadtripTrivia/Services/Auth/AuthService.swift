@@ -20,7 +20,7 @@ class AuthService: NSObject, ObservableObject {
 
     /// The anon key is safe to embed in the app — Row Level Security enforces data access.
     /// Get this from: Supabase Dashboard → Settings → API → anon/public key
-    private let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthaGt6YmN1dWRrcnJrdGtvYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEyMjgzMzYsImV4cCI6MjA3NjgwNDMzNn0.hVohhc8A5JppFVXC2ztZtj1sxmio34q5VYB6XG1N4cw"
+    private let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtha2h6YmN1dWRrcnJrdGtvYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDgzNzQsImV4cCI6MjA4Nzg4NDM3NH0.0AN73dPhhqOrRxPcOIODO58fanDKbPvJfUkqiovk4GQ"
 
     private let keychainService = "com.nagrom.roadtrip.auth"
     private let urlSession: URLSession
@@ -104,16 +104,32 @@ class AuthService: NSObject, ObservableObject {
         request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": email, "password": password])
 
+        print("[Auth] signUp request → \(url.absoluteString)")
         urlSession.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self, let data, let http = response as? HTTPURLResponse else {
+                    print("[Auth] signUp network error: \(error?.localizedDescription ?? "nil")")
                     completion(false, error?.localizedDescription)
                     return
                 }
+                print("[Auth] signUp response: HTTP \(http.statusCode)")
+                if let body = String(data: data, encoding: .utf8) {
+                    print("[Auth] signUp body: \(body.prefix(500))")
+                }
                 if http.statusCode == 200 || http.statusCode == 201 {
-                    self.handleAuthResponse(data: data) { ok in completion(ok, ok ? nil : "Sign up failed") }
+                    // Supabase returns tokens only when email confirmation is disabled.
+                    // When confirmation is enabled, the response has the user object but no tokens.
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       json["access_token"] != nil {
+                        // Tokens present — sign in immediately
+                        self.handleAuthResponse(data: data) { ok in completion(ok, ok ? nil : "Sign up failed") }
+                    } else {
+                        // No tokens — email confirmation required. Auto sign-in with credentials.
+                        print("[Auth] signUp succeeded, no tokens — auto signing in")
+                        self.signInWithEmail(email: email, password: password, completion: completion)
+                    }
                 } else {
-                    completion(false, self.parseError(data: data) ?? "Sign up failed")
+                    completion(false, self.parseError(data: data) ?? "Sign up failed (HTTP \(http.statusCode))")
                 }
             }
         }.resume()

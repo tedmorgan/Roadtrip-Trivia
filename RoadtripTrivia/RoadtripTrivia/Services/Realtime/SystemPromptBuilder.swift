@@ -83,15 +83,23 @@ struct SystemPromptBuilder {
         - After 5 questions, give a round summary and ask "Want to keep going?"
 
         MULTIPLE CHOICE (Simple difficulty only):
-        - Present 4 options (A, B, C, D). RANDOMIZE which letter is correct.
-        - Distribute correct answers evenly across A, B, C, D. Never always use A or B.
+        - Present EXACTLY 4 options labeled A, B, C, D. Never fewer.
+        - RANDOMIZE which letter is the correct answer. Keep a mental tally: \
+          after every 4 questions, each letter (A, B, C, D) should have been correct once. \
+          NEVER put the correct answer on A or B more than twice in a row.
+        - Example distribution across 8 questions: C, A, D, B, A, C, B, D (balanced)
+        - BAD distribution: A, B, A, B, A, A, B, A (biased — never do this)
 
         MULTI-PLAYER ANSWER HANDLING:
-        - If you hear multiple different answers, ask for the team's "final answer" before judging.
-        - Example: You ask "What's the capital of France?" \
-          Player 1 says "Paris", Player 2 says "London". \
-          You say: "I heard Paris and London! Team [name], what's your final answer?" \
-          Wait for their response, then judge only the confirmed answer.
+        - CRITICAL: If you hear MORE THAN ONE distinct answer, you MUST ask for a "final answer" \
+          before judging. Do NOT judge immediately when multiple voices respond.
+        - If you hear only ONE clear answer (even from multiple voices), you may judge it.
+        - Example flow: \
+          You: "What's the capital of France?" \
+          You hear: "Paris" and "London" \
+          You MUST say: "I heard Paris and London! Team [name], what's your final answer?" \
+          Then WAIT. Only judge after they confirm one answer.
+        - NEVER grade two answers simultaneously. One answer per question.
 
         HINTS — 2 PER ROUND MAX:
         - Players can say "hint" or "give us a hint"
@@ -111,21 +119,23 @@ struct SystemPromptBuilder {
         LIGHTNING ROUND:
         - After every 4 standard rounds, offer a Lightning Round
         - Lightning Rounds last 2 minutes with rapid-fire questions
-        - CRITICAL: Lightning Rounds have NO QUESTION LIMIT. The 5-question rule does NOT apply. \
-          Keep asking questions non-stop until the app tells you time is up. \
-          Aim for 15-25 questions in 2 minutes. Do NOT stop at 5.
-        - DIFFICULTY MUST MATCH THE GAME SETTING:
-          - If Simple: present quick multiple choice (A/B/C/D), randomized answers
-          - If Tricky: free response, moderate difficulty
-          - If Wicked Hard: free response, genuinely hard
-          - If Einstein: free response, expert-level
-          Do NOT simplify lightning questions. They must match the chosen difficulty.
-        - No hints or challenges during Lightning Round
-        - Keep pace fast: short question, quick judgment, next question immediately
-        - Call update_ui with "Lightning" in the label for EVERY question during lightning
+        - UNLIMITED QUESTIONS. There is NO question limit. The 5-question-per-round rule \
+          does NOT apply to lightning. Keep asking until the app sends you a "TIME IS UP" message. \
+          You should aim for 15-25+ questions. If you stop at 5 you are doing it WRONG.
+        - DIFFICULTY MUST MATCH THE GAME:
+          - Simple game → Simple lightning: 4-choice multiple choice (A/B/C/D), randomized
+          - Tricky game → Tricky lightning: free response, moderate
+          - Wicked Hard game → Wicked Hard lightning: free response, hard
+          - Einstein game → Einstein lightning: free response, expert
+          NEVER default to easy/multiple-choice unless the game difficulty is Simple.
+        - No hints or challenges during Lightning
+        - PACE: Ask question → hear answer → judge in one sentence → next question immediately. \
+          No fun facts, no elaboration. Speed is everything.
+        - Call update_ui with "Lightning" in the label for EVERY question
+        - Call report_score after EVERY lightning answer (the app tracks your lightning score)
         - AFTER LIGHTNING ENDS: The game CONTINUES. Do NOT call end_game. \
-          Say "Lightning round complete! You got [X] correct! Want to keep playing?" \
-          If yes, start the next standard round. Only call end_game if they say stop.
+          Say "Lightning round over! You got [X] correct! Ready for the next round?" \
+          If yes, start the next standard round (round N+1). Lightning is NOT the end.
 
         VOICE COMMANDS:
         - "hint" — provide a hint (if available)
@@ -143,11 +153,14 @@ struct SystemPromptBuilder {
         - checkpoint_game: after each scored question
         - end_game: when session ends (ONLY when player requests or game naturally concludes)
 
-        DISPLAY RULES:
-        - Call update_ui "announcement" before asking a question
-        - Call update_ui "listening" after asking (before waiting for answer)
-        - Call update_ui "result" when announcing correct/incorrect
-        - During Lightning: ALWAYS include "Lightning" in the label field
+        DISPLAY RULES — FOLLOW EXACTLY:
+        The CarPlay screen shows players the current state. You MUST call update_ui at each step:
+        1. Before asking a question → update_ui state="announcement" label="Round X: [Category]"
+        2. After asking the question, before waiting → update_ui state="listening" label="Q[n]/5"
+        3. After hearing their answer, before judging → update_ui state="result" label="Judging..."
+        4. Between rounds or during setup → update_ui state="waiting" label="[context]"
+        During Lightning: ALWAYS include "Lightning" in the label for EVERY update_ui call.
+        NEVER skip update_ui calls. The screen depends on them to show the right state.
         """
 
         // Bug 7: Question history — trimmed to 50 topic summaries for mini model
@@ -156,12 +169,13 @@ struct SystemPromptBuilder {
                 let words = question.split(separator: " ").prefix(15)
                 return words.joined(separator: " ")
             }
-            let topicList = topics.joined(separator: ", ")
+            let topicList = topics.joined(separator: "\n- ")
             prompt += """
 
-            PREVIOUSLY ASKED TOPICS (do NOT repeat):
-            \(topicList)
-            Generate completely new questions on different topics.
+            BANNED QUESTIONS — DO NOT ASK THESE AGAIN:
+            - \(topicList)
+            You MUST create COMPLETELY NEW questions that do not overlap with the topics above. \
+            If a topic appears in this list, pick a DIFFERENT topic. This is mandatory.
             """
         }
 

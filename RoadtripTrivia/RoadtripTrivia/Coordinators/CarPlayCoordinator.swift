@@ -15,7 +15,7 @@ private extension DateFormatter {
 /// Depth 1: CPListTemplate (Home) — "Start New Game" / "Resume Last Game"
 /// Depth 2: CPVoiceControlTemplate (Playing) — all gameplay states
 /// Depth 3: CPListTemplate (Score Summary) — optional tap target
-class CarPlayCoordinator {
+class CarPlayCoordinator: NSObject {
 
     private let interfaceController: CPInterfaceController
     private var realtimeCoordinator: RealtimeGameCoordinator?
@@ -37,6 +37,7 @@ class CarPlayCoordinator {
 
     init(interfaceController: CPInterfaceController) {
         self.interfaceController = interfaceController
+        super.init()
         // Bug 24: Detect when templates are popped (back/cancel button)
         interfaceController.delegate = self
     }
@@ -89,9 +90,13 @@ class CarPlayCoordinator {
             let historyItems: [CPListItem] = recentGames.map { session in
                 let team = session.teamName ?? "Game"
                 let date = DateFormatter.shortDate.string(from: session.lastPlayedAt)
+                // Bug 16: Use totalQuestionsAnswered to derive round count more accurately.
+                // Each standard round has ~5 questions; this avoids depending on rounds array.
+                let roundCount = max(session.rounds.count, (session.totalQuestionsAnswered + 4) / 5)
+                let roundLabel = roundCount == 1 ? "1 round" : "\(roundCount) rounds"
                 let item = CPListItem(
                     text: "\(team) — \(session.totalQuestionsCorrect)/\(session.totalQuestionsAnswered)",
-                    detailText: "\(session.rounds.count) rounds • \(session.difficulty.rawValue) • \(date)"
+                    detailText: "\(roundLabel) • \(session.difficulty.rawValue) • \(date)"
                 )
                 // Bug 8/18/22: Tapping a past game starts a new game with the same config
                 item.handler = { [weak self] _, completion in
@@ -273,6 +278,12 @@ class CarPlayCoordinator {
     func handleDisconnect() {
         refreshWorkItem?.cancel()
         refreshWorkItem = nil
+
+        // Bug 22: Save the in-progress session to history so it shows in Recent Games
+        if let session = gameViewModel.currentSession, session.totalQuestionsAnswered > 0 {
+            persistenceService.saveCompletedSession(session)
+        }
+
         realtimeCoordinator?.disconnect()
         realtimeCoordinator = nil
         playingTemplate = nil

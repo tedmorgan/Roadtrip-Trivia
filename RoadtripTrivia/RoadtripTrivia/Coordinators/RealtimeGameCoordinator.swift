@@ -578,21 +578,31 @@ class RealtimeGameCoordinator: ObservableObject {
             if self.lightningSecondsRemaining <= 0 {
                 self.lightningTimer?.invalidate()
                 self.lightningTimer = nil
-                // Notify the LLM that lightning time is up
+
+                // Bug 19: Interrupt anything the LLM is currently saying, then tell it time is up
                 Task {
+                    // Cancel any in-progress response so the "TIME IS UP" message takes priority
+                    try? await self.sessionManager.send(.responseCancel)
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s pause
                     try? await self.sessionManager.send(.responseCreate(
-                        instructions: "TIME IS UP! The 2-minute lightning round is over. You got \(self.lightningCorrect) correct out of \(self.lightningAnswered). Announce the score and ask if they want to keep playing."
+                        instructions: "STOP! TIME IS UP! The lightning round is OVER. Score: \(self.lightningCorrect) correct out of \(self.lightningAnswered). Do NOT ask another question. Announce the final lightning score and ask if they want to keep playing the NEXT round."
                     ))
                 }
 
-                // Bug 19: Hard cutoff — if LLM hasn't ended lightning within 15s, force it
+                // Bug 19: Hard cutoff — if LLM hasn't moved on within 10s, force stop lightning
                 let cutoff = DispatchWorkItem { [weak self] in
                     guard let self, self.isLightningRound else { return }
-                    print("[RealtimeGame] Force-ending lightning round (15s cutoff)")
+                    print("[RealtimeGame] Force-ending lightning round (10s cutoff)")
                     self.stopLightningTimer()
+                    // Send one more nudge
+                    Task {
+                        try? await self.sessionManager.send(.responseCreate(
+                            instructions: "Lightning round is over. Move to the next standard round now."
+                        ))
+                    }
                 }
                 self.lightningEndCutoffWork = cutoff
-                DispatchQueue.main.asyncAfter(deadline: .now() + 15.0, execute: cutoff)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: cutoff)
             }
         }
         print("[RealtimeGame] Lightning round started — 120s timer")
@@ -658,18 +668,81 @@ class RealtimeGameCoordinator: ObservableObject {
 
     private func observeInterruptions() {
         audioManager.onInterruption = { [weak self] in
-            self?.audioService.stopStreaming()
-            self?.gameViewModel.transition(to: .paused)
+            guard let self else { return }
+            print("[RealtimeGame] Audio interrupted — pausing game")
+            // Pause lightning timer if running
+            self.lightningTimer?.invalidate()
+            self.lightningTimer = nil
+            self.audioService.stopStreaming()
+            self.gameViewModel.transition(to: .paused)
         }
 
         audioManager.onInterruptionEnd = { [weak self] in
             guard let self else { return }
+            print("[RealtimeGame] Audio interruption ended — resuming game")
             do {
+                // Re-activate audio and restart streaming
+                self.audioManager.activateForSpeech()
                 try self.audioService.startStreaming()
                 self.gameViewModel.transition(to: .playing)
+
+                // Bug 25: Nudge the LLM to continue after the interruption.
+                // The WebSocket stays connected but the LLM may have gone silent.
+                if self.isLightningRound {
+                    // Resume lightning timer with remaining time
+                    self.resumeLightningTimer()
+                    Task {
+                        try? await self.sessionManager.send(.responseCreate(
+                            instructions: "The player is back after a brief interruption. Continue the lightning round — \(self.lightningSecondsRemaining) seconds left. Ask the next question immediately."
+                        ))
+                    }
+                } else {
+                    Task {
+                        try? await self.sessionManager.send(.responseCreate(
+                            instructions: "The player is back after a brief interruption. Welcome them back briefly and continue where you left off. If you were mid-question, repeat it."
+                        ))
+                    }
+                }
             } catch {
                 print("[RealtimeGame] Failed to resume audio: \(error)")
+                // If audio restart fails, try reconnecting the whole session
+                self.gameViewModel.connectionError = "Audio failed to resume. Please restart the game."
             }
         }
+    }
+
+    /// Resume the lightning timer with whatever time was remaining when interrupted.
+    private func resumeLightningTimer() {
+        guard isLightningRound, lightningSecondsRemaining > 0 else { return }
+
+        lightningTimer?.invalidate()
+        lightningTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.lightningSecondsRemaining -= 1
+            self.stateManager.updateLightningTimer(
+                secondsRemaining: self.lightningSecondsRemaining,
+                lightningCorrect: self.lightningCorrect
+            )
+
+            if self.lightningSecondsRemaining <= 0 {
+                self.lightningTimer?.invalidate()
+                self.lightningTimer = nil
+                Task {
+                    try? await self.sessionManager.send(.responseCancel)
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    try? await self.sessionManager.send(.responseCreate(
+                        instructions: "STOP! TIME IS UP! Lightning score: \(self.lightningCorrect)/\(self.lightningAnswered). Announce the score and ask if they want to keep playing."
+                    ))
+                }
+
+                let cutoff = DispatchWorkItem { [weak self] in
+                    guard let self, self.isLightningRound else { return }
+                    self.stopLightningTimer()
+                }
+                self.lightningEndCutoffWork = cutoff
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: cutoff)
+            }
+        }
+        print("[RealtimeGame] Lightning timer resumed with \(lightningSecondsRemaining)s remaining")
     }
 }

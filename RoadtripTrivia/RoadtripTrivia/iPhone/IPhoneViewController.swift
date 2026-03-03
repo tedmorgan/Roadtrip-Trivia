@@ -380,7 +380,11 @@ class IPhoneViewController: UIViewController {
 
     private func requestPermissions() {
         LocationService.shared.requestAuthorization()
-        AVAudioSession.sharedInstance().requestRecordPermission { _ in }
+        if #available(iOS 17.0, *) {
+            AVAudioApplication.requestRecordPermission { _ in }
+        } else {
+            AVAudioSession.sharedInstance().requestRecordPermission { _ in }
+        }
     }
 
     // MARK: - Account Settings
@@ -418,7 +422,7 @@ class AccountSettingsSheet: UIViewController {
         view.backgroundColor = .systemBackground
 
         navigationItem.title = "Settings"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismiss(_:)))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissSheet))
 
         isAuthenticated = authService.isAuthenticated
         let stack = UIStackView()
@@ -446,6 +450,10 @@ class AccountSettingsSheet: UIViewController {
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
         ])
+    }
+
+    @objc private func dismissSheet() {
+        dismiss(animated: true)
     }
 
     @objc private func handleSignInWithApple() {

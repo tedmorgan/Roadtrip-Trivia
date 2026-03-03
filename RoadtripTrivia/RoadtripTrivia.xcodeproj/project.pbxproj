@@ -20,6 +20,8 @@
 		A10016 /* SessionPersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10016 /* SessionPersistenceService.swift */; };
 		A10017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10017 /* Assets.xcassets */; };
 		A30001 /* thinking_stinger.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30001 /* thinking_stinger.mp3 */; };
+		A30002 /* correct_ching.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30002 /* correct_ching.mp3 */; };
+		A30003 /* incorrect_gong.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30003 /* incorrect_gong.mp3 */; };
 		A10018 /* GameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10018 /* GameState.swift */; };
 		A10019 /* IPhoneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10019 /* IPhoneViewController.swift */; };
 		A20001 /* RealtimeGameCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001 /* RealtimeGameCoordinator.swift */; };
@@ -45,6 +47,8 @@
 		B10016 /* SessionPersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPersistenceService.swift; sourceTree = "<group>"; };
 		B10017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B30001 /* thinking_stinger.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = thinking_stinger.mp3; sourceTree = "<group>"; };
+		B30002 /* correct_ching.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = correct_ching.mp3; sourceTree = "<group>"; };
+		B30003 /* incorrect_gong.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = incorrect_gong.mp3; sourceTree = "<group>"; };
 		B10018 /* GameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameState.swift; sourceTree = "<group>"; };
 		B10019 /* IPhoneViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPhoneViewController.swift; sourceTree = "<group>"; };
 		B10020 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -163,6 +167,8 @@
 			children = (
 				B10017 /* Assets.xcassets */,
 				B30001 /* thinking_stinger.mp3 */,
+				B30002 /* correct_ching.mp3 */,
+				B30003 /* incorrect_gong.mp3 */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -278,6 +284,8 @@
 			files = (
 				A10017 /* Assets.xcassets in Resources */,
 				A30001 /* thinking_stinger.mp3 in Resources */,
+				A30002 /* correct_ching.mp3 in Resources */,
+				A30003 /* incorrect_gong.mp3 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -52,11 +52,11 @@ enum RealtimeClientEvent {
             return ["type": "input_audio_buffer.clear"]
 
         case .responseCreate(let instructions):
-            var event: [String: Any] = ["type": "response.create"]
+            var response: [String: Any] = ["modalities": ["text", "audio"]]
             if let instructions {
-                event["response"] = ["instructions": instructions]
+                response["instructions"] = instructions
             }
-            return event
+            return ["type": "response.create", "response": response]
 
         case .conversationItemCreate(let callId, let output):
             return [

@@ -74,6 +74,12 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         guard let jsonString = String(data: data, encoding: .utf8) else {
             throw RealtimeError.sendFailed("Could not encode event as UTF-8 string")
         }
+        // Bug 31: Log outgoing event types for diagnostics
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let eventType = json["type"] as? String,
+           !eventType.contains("audio_buffer") {
+            print("[Realtime] Sending: \(eventType)")
+        }
         try await ws.send(.string(jsonString))
     }
 
@@ -202,8 +208,19 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             return
         }
 
+        // Bug 31: Log raw event type for diagnostics
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let eventType = json["type"] as? String {
+            // Only log non-audio events to avoid flooding the console
+            if !eventType.contains("audio.delta") && !eventType.contains("audio_buffer") {
+                print("[Realtime] Event: \(eventType)")
+            }
+        }
+
         guard let event = RealtimeServerEvent.parse(from: data) else {
-            print("[Realtime] Unparseable event")
+            // Bug 31: Show what we couldn't parse
+            let preview = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
+            print("[Realtime] Unparseable event: \(preview)")
             return
         }
 

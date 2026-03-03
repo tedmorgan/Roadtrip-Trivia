@@ -489,8 +489,7 @@ class RealtimeGameCoordinator: ObservableObject {
         case "announcement":
             gameViewModel.transition(to: .speaking)
         case "result":
-            // Play a brief thinking stinger before the result reveal (AUDIO-01)
-            playThinkingStinger()
+            // Bug 26: Correct/incorrect sounds now play in handleReportScore instead
             gameViewModel.transition(to: .showingResult)
         case "waiting":
             gameViewModel.transition(to: .waiting)
@@ -666,11 +665,7 @@ class RealtimeGameCoordinator: ObservableObject {
         print("[RealtimeGame] Lightning round ended")
     }
 
-    // MARK: - Sound Effects (AUDIO-01, Bug 26)
-
-    private func playThinkingStinger() {
-        audioService.playBundledSound(named: "thinking_stinger")
-    }
+    // MARK: - Sound Effects (Bug 26)
 
     /// Bug 26: Play cash register "ching" sound for correct answers
     private func playCorrectSound() {

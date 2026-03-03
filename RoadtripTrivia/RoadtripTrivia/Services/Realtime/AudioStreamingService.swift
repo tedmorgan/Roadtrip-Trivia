@@ -57,7 +57,8 @@ class AudioStreamingService: ObservableObject {
 
     /// Bug 30: Maximum number of audio buffers that can be queued at once.
     /// Prevents memory exhaustion during long lightning rounds.
-    private let maxScheduledBuffers = 15
+    /// Set high enough to avoid dropping audio during normal speech (~100ms per chunk).
+    private let maxScheduledBuffers = 80
 
     // MARK: - Setup
 

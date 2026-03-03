@@ -215,6 +215,16 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             if !eventType.contains("audio.delta") && !eventType.contains("audio_buffer") {
                 print("[Realtime] Event: \(eventType)")
             }
+            // Log response.done status to diagnose empty responses
+            if eventType == "response.done",
+               let response = json["response"] as? [String: Any] {
+                let status = response["status"] as? String ?? "?"
+                let statusDetails = response["status_details"] as? [String: Any]
+                let reason = statusDetails?["reason"] as? String
+                    ?? statusDetails?["error"] as? String
+                    ?? (statusDetails.map { "\($0)" } ?? "none")
+                print("[Realtime] Response status: \(status), details: \(reason)")
+            }
         }
 
         guard let event = RealtimeServerEvent.parse(from: data) else {

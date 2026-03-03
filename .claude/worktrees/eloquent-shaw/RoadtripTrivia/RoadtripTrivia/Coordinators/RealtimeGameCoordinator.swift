@@ -51,9 +51,6 @@ class RealtimeGameCoordinator: ObservableObject {
     private var questionHistory: [String] = []
     private let questionHistoryKey = "askedQuestionHistory"
 
-    // Bug 23: Track whether user has played before (for first-time instructions)
-    private let hasPlayedBeforeKey = "hasPlayedBefore"
-
     // MARK: - Init
 
     init(gameViewModel: GameViewModel, stateManager: VoiceControlStateManager) {
@@ -71,18 +68,13 @@ class RealtimeGameCoordinator: ObservableObject {
 
     func startNewGame() {
         gameViewModel.transition(to: .connecting)
-        gameViewModel.resetDisplayProperties()
 
         // Load question history to avoid repeats (Bug 7)
         loadQuestionHistory()
 
-        // Bug 23: Check if this is the user's first game
-        let isFirstGame = !UserDefaults.standard.bool(forKey: hasPlayedBeforeKey)
-
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: locationService.currentLocationLabel,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: isFirstGame
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory
         )
 
         Task { @MainActor in
@@ -107,7 +99,6 @@ class RealtimeGameCoordinator: ObservableObject {
 
     func resumeGame(from checkpoint: SessionCheckpoint) {
         gameViewModel.transition(to: .connecting)
-        gameViewModel.resetDisplayProperties()
         gameViewModel.restoreFromCheckpoint(checkpoint)
 
         // Restore tracking state
@@ -124,12 +115,10 @@ class RealtimeGameCoordinator: ObservableObject {
         loadQuestionHistory()
 
         let resumeContext = ResumeContext(from: checkpoint)
-        // Resumed games are never first-time
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: checkpoint.locationLabel,
             resumeContext: resumeContext,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: false
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory
         )
 
         Task { @MainActor in
@@ -158,7 +147,6 @@ class RealtimeGameCoordinator: ObservableObject {
         teamName: String?
     ) {
         gameViewModel.transition(to: .connecting)
-        gameViewModel.resetDisplayProperties()
         gameViewModel.createSession(
             difficulty: difficulty,
             playerCount: playerCount,
@@ -176,12 +164,10 @@ class RealtimeGameCoordinator: ObservableObject {
             teamName: teamName
         )
 
-        // Bug 18/23: Pre-configured games are always returning players
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: locationService.currentLocationLabel,
             preconfiguredContext: preconfig,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: false
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory
         )
 
         Task { @MainActor in
@@ -206,9 +192,6 @@ class RealtimeGameCoordinator: ObservableObject {
     func disconnect() {
         lightningTimer?.invalidate()
         lightningTimer = nil
-        lightningEndCutoffWork?.cancel()
-        lightningEndCutoffWork = nil
-        cancellables.removeAll()          // Bug 29/31: prevent duplicate subscriptions on resume
         audioService.stopStreaming()
         sessionManager.disconnect()
         audioManager.deactivate()
@@ -258,10 +241,6 @@ class RealtimeGameCoordinator: ObservableObject {
         case .error(let message, let code):
             print("[RealtimeGame] Error [\(code ?? "?")]: \(message)")
             if message.contains("session_expired") || message.contains("invalid_api_key") {
-                handleNetworkError()
-            } else if code == "reconnect_failed" {
-                // Bug 29/31: All reconnection attempts exhausted — save game and go idle
-                print("[RealtimeGame] Reconnection exhausted — ending session gracefully")
                 handleNetworkError()
             }
 
@@ -342,12 +321,8 @@ class RealtimeGameCoordinator: ObservableObject {
             teamName: args.teamName
         )
 
-        // Bug 9: Pass team name to state manager for CarPlay display + iPhone display
+        // Bug 9: Pass team name to state manager for CarPlay display
         stateManager.setTeamName(args.teamName)
-        gameViewModel.displayTeamName = args.teamName ?? ""
-
-        // Bug 23: Mark that the user has played at least one game
-        UserDefaults.standard.set(true, forKey: hasPlayedBeforeKey)
 
         print("[RealtimeGame] Config set: \(args.playerCount) players, \(args.difficulty), team: \(args.teamName ?? ""), ages: \(args.ageBands)")
 
@@ -374,13 +349,6 @@ class RealtimeGameCoordinator: ObservableObject {
         }
         currentQuestionIndex = args.questionIndex
 
-        // Bug 26: Play correct/incorrect sound effect
-        if args.isCorrect {
-            playCorrectSound()
-        } else {
-            playIncorrectSound()
-        }
-
         // Bug 21: Dedicated lightning counters — only increment during lightning
         if isLightningRound {
             lightningAnswered += 1
@@ -389,16 +357,13 @@ class RealtimeGameCoordinator: ObservableObject {
             }
         }
 
-        // Bug 20/27/28: Track per-round hint/challenge usage with explicit denial
+        // Bug 20: Track per-round hint/challenge usage
         var actualHint = args.wasHint ?? false
         var actualChallenge = args.wasChallenge ?? false
-        var hintDenied = false
-        var challengeDenied = false
         if actualHint {
             if roundHintsUsed >= maxHintsPerRound {
                 actualHint = false // exceeded limit, don't count
-                hintDenied = true
-                print("[RealtimeGame] Hint DENIED — over limit (\(roundHintsUsed)/\(maxHintsPerRound))")
+                print("[RealtimeGame] Hint over limit (\(roundHintsUsed)/\(maxHintsPerRound))")
             } else {
                 roundHintsUsed += 1
             }
@@ -406,20 +371,15 @@ class RealtimeGameCoordinator: ObservableObject {
         if actualChallenge {
             if roundChallengesUsed >= maxChallengesPerRound {
                 actualChallenge = false
-                challengeDenied = true
-                print("[RealtimeGame] Challenge DENIED — over limit (\(roundChallengesUsed)/\(maxChallengesPerRound))")
+                print("[RealtimeGame] Challenge over limit (\(roundChallengesUsed)/\(maxChallengesPerRound))")
             } else {
                 roundChallengesUsed += 1
             }
         }
 
         // Track question text for history (Bug 7)
-        // Bug 29: Cap in-memory history to 20 to keep system prompt under token limits
         if let questionText = args.questionText, !questionText.isEmpty {
             questionHistory.append(questionText)
-            if questionHistory.count > 20 {
-                questionHistory = Array(questionHistory.suffix(20))
-            }
             saveQuestionHistory()
         }
 
@@ -431,7 +391,7 @@ class RealtimeGameCoordinator: ObservableObject {
             wasChallenge: actualChallenge
         )
 
-        // Update CarPlay score display + iPhone display properties
+        // Update CarPlay score display
         if isLightningRound {
             stateManager.updateLightningTimer(
                 secondsRemaining: lightningSecondsRemaining,
@@ -445,13 +405,9 @@ class RealtimeGameCoordinator: ObservableObject {
                 totalInRound: 5
             )
         }
-        // Mirror display properties for iPhone UI
-        gameViewModel.displayRoundCorrect = roundCorrect
-        gameViewModel.displayTotalCorrect = totalCorrect
-        gameViewModel.displayQuestionInRound = args.questionIndex + 1
 
-        // Bug 20/27/28: Return hint/challenge limits and denial info so LLM enforces limits
-        var result: [String: Any] = [
+        // Bug 20: Return hint/challenge limits in result so LLM knows remaining
+        let result: [String: Any] = [
             "acknowledged": true,
             "totalCorrect": totalCorrect,
             "totalAnswered": totalAnswered,
@@ -459,16 +415,6 @@ class RealtimeGameCoordinator: ObservableObject {
             "hintsRemainingThisRound": max(0, maxHintsPerRound - roundHintsUsed),
             "challengesRemainingThisRound": max(0, maxChallengesPerRound - roundChallengesUsed)
         ]
-        // Bug 27: Explicitly tell LLM when a hint was denied
-        if hintDenied {
-            result["hintDenied"] = true
-            result["hintDeniedMessage"] = "HINT DENIED: All \(maxHintsPerRound) hints used this round. Tell the player: Sorry, no more hints this round!"
-        }
-        // Bug 28: Explicitly tell LLM when a challenge was denied
-        if challengeDenied {
-            result["challengeDenied"] = true
-            result["challengeDeniedMessage"] = "CHALLENGE DENIED: The \(maxChallengesPerRound) challenge for this round has been used. Tell the player: No more challenges this round!"
-        }
         submitResult(callId: callId, result: result)
     }
 
@@ -497,7 +443,8 @@ class RealtimeGameCoordinator: ObservableObject {
         case "announcement":
             gameViewModel.transition(to: .speaking)
         case "result":
-            // Bug 26: Correct/incorrect sounds now play in handleReportScore instead
+            // Play a brief thinking stinger before the result reveal (AUDIO-01)
+            playThinkingStinger()
             gameViewModel.transition(to: .showingResult)
         case "waiting":
             gameViewModel.transition(to: .waiting)
@@ -550,12 +497,10 @@ class RealtimeGameCoordinator: ObservableObject {
         let roundType: RoundType = isLightningRound ? .lightning : .standard
         gameViewModel.startNewRoundIfNeeded(roundNumber: args.roundNumber, category: currentCategory, type: roundType)
 
-        // Update round label on CarPlay display + iPhone display properties
+        // Update round label on CarPlay display
         stateManager.updateRound(number: currentRoundNumber, category: currentCategory)
-        gameViewModel.displayRoundNumber = currentRoundNumber
-        gameViewModel.displayCategory = currentCategory
 
-        // Bug 30: Save checkpoint off main thread to prevent blocking the UI/WebSocket loop
+        // Save checkpoint for resume
         let checkpoint = SessionCheckpoint(
             sessionID: gameViewModel.currentSession?.id ?? UUID(),
             roundIndex: args.roundNumber - 1,
@@ -572,9 +517,7 @@ class RealtimeGameCoordinator: ObservableObject {
             teamName: gameViewModel.currentSession?.teamName,
             savedAt: Date()
         )
-        DispatchQueue.global(qos: .utility).async { [persistence] in
-            persistence.saveCheckpoint(checkpoint)
-        }
+        persistence.saveCheckpoint(checkpoint)
 
         submitResult(callId: callId, result: ["saved": true])
     }
@@ -622,7 +565,6 @@ class RealtimeGameCoordinator: ObservableObject {
         roundChallengesUsed = 0
 
         stateManager.updateLightningTimer(secondsRemaining: lightningSecondsRemaining, lightningCorrect: lightningCorrect)
-        gameViewModel.lightningSecondsRemaining = lightningSecondsRemaining
 
         lightningTimer?.invalidate()
         lightningTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -632,7 +574,6 @@ class RealtimeGameCoordinator: ObservableObject {
                 secondsRemaining: self.lightningSecondsRemaining,
                 lightningCorrect: self.lightningCorrect
             )
-            self.gameViewModel.lightningSecondsRemaining = self.lightningSecondsRemaining
 
             if self.lightningSecondsRemaining <= 0 {
                 self.lightningTimer?.invalidate()
@@ -674,46 +615,29 @@ class RealtimeGameCoordinator: ObservableObject {
         lightningEndCutoffWork = nil
         isLightningRound = false
         stateManager.clearLightning()
-        gameViewModel.lightningSecondsRemaining = nil
         print("[RealtimeGame] Lightning round ended")
     }
 
-    // MARK: - Sound Effects (Bug 26)
+    // MARK: - Thinking Stinger (AUDIO-01)
 
-    /// Bug 26: Play cash register "ching" sound for correct answers
-    private func playCorrectSound() {
-        audioService.playBundledSound(named: "correct_ching")
-    }
-
-    /// Bug 26: Play gong sound for incorrect answers
-    private func playIncorrectSound() {
-        audioService.playBundledSound(named: "incorrect_gong")
+    private func playThinkingStinger() {
+        audioService.playBundledSound(named: "thinking_stinger")
     }
 
     // MARK: - Question History (Bug 7)
 
     private func loadQuestionHistory() {
         questionHistory = UserDefaults.standard.stringArray(forKey: questionHistoryKey) ?? []
-        // Bug 29: Keep only last 20 questions in prompt to prevent token overflow.
-        // Full history stays on disk (up to 200) so questions aren't repeated across sessions.
-        if questionHistory.count > 20 {
-            questionHistory = Array(questionHistory.suffix(20))
+        // Bug 7: Keep last 50 questions — shorter list for mini model to process
+        if questionHistory.count > 50 {
+            questionHistory = Array(questionHistory.suffix(50))
         }
         print("[RealtimeGame] Loaded \(questionHistory.count) questions from history")
     }
 
     private func saveQuestionHistory() {
-        // Save up to 200 questions on disk for long-term dedup,
-        // but only send 20 to the LLM via the system prompt.
-        var allHistory = UserDefaults.standard.stringArray(forKey: questionHistoryKey) ?? []
-        // Merge any new questions not already in the full list
-        for q in questionHistory where !allHistory.contains(q) {
-            allHistory.append(q)
-        }
-        if allHistory.count > 200 {
-            allHistory = Array(allHistory.suffix(200))
-        }
-        UserDefaults.standard.set(allHistory, forKey: questionHistoryKey)
+        let trimmed = Array(questionHistory.suffix(50))
+        UserDefaults.standard.set(trimmed, forKey: questionHistoryKey)
     }
 
     // MARK: - Submit Function Result
@@ -731,13 +655,9 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Network Error Recovery
 
     private func handleNetworkError() {
-        // Bug 29: Guard against nil session to prevent crash
-        if let session = gameViewModel.currentSession {
-            let checkpoint = SessionCheckpoint(session: session)
-            DispatchQueue.global(qos: .utility).async { [persistence] in
-                persistence.saveCheckpoint(checkpoint)
-            }
-        }
+        // Save state immediately
+        let checkpoint = SessionCheckpoint(session: gameViewModel.currentSession!)
+        persistence.saveCheckpoint(checkpoint)
 
         audioService.stopStreaming()
         gameViewModel.transition(to: .paused)

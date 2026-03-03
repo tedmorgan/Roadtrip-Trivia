@@ -8,30 +8,12 @@ import Combine
 /// via RealtimeGameCoordinator, rather than by a code-driven state machine.
 class GameViewModel: ObservableObject {
 
-    // MARK: - Singleton
-    static let shared = GameViewModel()
-
     @Published var currentPhase: GamePhase = .idle
     @Published private(set) var currentSession: TriviaSession?
 
     /// Realtime connection state
     @Published var isConnected = false
     @Published var connectionError: String?
-
-    // MARK: - Display Properties (for iPhone UI real-time updates)
-    // Updated by RealtimeGameCoordinator on every score/round change
-
-    @Published var displayTeamName: String = ""
-    @Published var displayRoundNumber: Int = 0
-    @Published var displayQuestionInRound: Int = 0      // 1-based
-    @Published var displayCategory: String = ""
-    @Published var displayRoundCorrect: Int = 0
-    @Published var displayTotalCorrect: Int = 0
-    @Published var lightningSecondsRemaining: Int? = nil // nil = not in lightning
-
-    // Computed helpers for score display (100 pts per correct answer)
-    var roundPoints: Int { displayRoundCorrect * 100 }
-    var totalPoints: Int { displayTotalCorrect * 100 }
 
     var currentRound: TriviaRound? {
         guard let session = currentSession,
@@ -208,18 +190,6 @@ class GameViewModel: ObservableObject {
     func endSession() {
         currentSession?.isComplete = true
         currentSession?.lastPlayedAt = Date()
-        resetDisplayProperties()
-    }
-
-    /// Reset all display properties for iPhone UI (called on game end, new game start)
-    func resetDisplayProperties() {
-        displayTeamName = ""
-        displayRoundNumber = 0
-        displayQuestionInRound = 0
-        displayCategory = ""
-        displayRoundCorrect = 0
-        displayTotalCorrect = 0
-        lightningSecondsRemaining = nil
     }
 
     func restoreFromCheckpoint(_ checkpoint: SessionCheckpoint) {

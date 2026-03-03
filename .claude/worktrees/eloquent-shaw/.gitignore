@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+*/.DS_Store
+**/.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Supabase temp files
+supabase/.temp/
+
+# Editor temp files
+~$*
+
+# Backup files from refactoring
+*.swift.old
+SystemPromptBuilder_backup_phase1.swift
+
+# Provisioning profiles (sensitive)
+*.mobileprovision
+
+# Environment files
+.env
+.env.local

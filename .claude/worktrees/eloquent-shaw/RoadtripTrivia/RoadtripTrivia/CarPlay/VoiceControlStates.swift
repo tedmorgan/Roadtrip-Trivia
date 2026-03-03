@@ -62,7 +62,7 @@ class VoiceControlStateManager {
         self.questionInRound = questionInRound
         self.totalInRound = totalInRound
         isShowingRoundSummary = false
-        // No longer trigger template refresh on score changes — iPhone UI shows scores instead
+        onNeedsRefresh?()
     }
 
     func updateRound(number: Int, category: String) {
@@ -167,7 +167,22 @@ class VoiceControlStateManager {
     // ── Listening ──────────────────────────────────────────
 
     private func buildListeningState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Speak your answer"]
+        var titles: [String]
+        if isLightningActive {
+            // "Lightning 1:45 | 3 correct"
+            titles = ["\(teamPrefix)Lightning \(lightningTimerLabel) | \(lightningCorrect) correct",
+                      "Lightning \(lightningTimerLabel)",
+                      "Answer!"]
+        } else if hasScore {
+            // "Quizzards: Rd 2 Q3/5 | 4/7"
+            titles = ["\(teamPrefix)\(progressLabel) | \(scoreLabel)",
+                      "\(progressLabel) | \(scoreLabel)",
+                      "Your answer?"]
+        } else if let name = teamName, !name.isEmpty {
+            titles = ["\(name) — Listening...", "Listening..."]
+        } else {
+            titles = ["Listening...", "Speak your answer"]
+        }
         return CPVoiceControlState(
             identifier: VoiceControlStateID.listening.rawValue,
             titleVariants: titles,
@@ -179,7 +194,16 @@ class VoiceControlStateManager {
     // ── Processing ─────────────────────────────────────────
 
     private func buildProcessingState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Thinking..."]
+        var titles: [String]
+        if isLightningActive {
+            titles = ["\(teamPrefix)Lightning \(lightningTimerLabel) | Judging...",
+                      "Lightning \(lightningTimerLabel)"]
+        } else if hasScore {
+            titles = ["\(teamPrefix)\(progressLabel) | Judging...",
+                      "Thinking..."]
+        } else {
+            titles = ["Thinking...", "Judging your answer..."]
+        }
         return CPVoiceControlState(
             identifier: VoiceControlStateID.processing.rawValue,
             titleVariants: titles,
@@ -191,7 +215,16 @@ class VoiceControlStateManager {
     // ── Result ─────────────────────────────────────────────
 
     private func buildResultState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Result"]
+        var titles: [String]
+        if isLightningActive {
+            titles = ["\(teamPrefix)Lightning \(lightningTimerLabel) | \(lightningCorrect) correct",
+                      "Lightning \(lightningTimerLabel)"]
+        } else if hasScore {
+            titles = ["\(teamPrefix)Score: \(scoreLabel)",
+                      "Score: \(scoreLabel)"]
+        } else {
+            titles = ["Result"]
+        }
         return CPVoiceControlState(
             identifier: VoiceControlStateID.result.rawValue,
             titleVariants: titles,
@@ -203,11 +236,22 @@ class VoiceControlStateManager {
     // ── Announcement (question / round intro) ──────────────
 
     private func buildAnnouncementState() -> CPVoiceControlState {
-        let titles: [String]
+        var titles: [String]
         if isLightningActive {
-            titles = ["⚡ Lightning Round", "Lightning"]
+            titles = ["\(teamPrefix)Lightning \(lightningTimerLabel) | \(lightningCorrect) correct",
+                      "Lightning Round"]
+        } else if !currentCategory.isEmpty && currentRoundNumber > 0 {
+            // "Quizzards: Rd 2 — History | 4/7"
+            let roundInfo = "Rd \(currentRoundNumber) — \(currentCategory)"
+            if hasScore {
+                titles = ["\(teamPrefix)\(roundInfo) | \(scoreLabel)", roundInfo]
+            } else {
+                titles = ["\(teamPrefix)\(roundInfo)", roundInfo]
+            }
+        } else if hasScore {
+            titles = ["\(teamPrefix)Score: \(scoreLabel)", "Next question..."]
         } else {
-            titles = [currentCategory, "Roadtrip Trivia"]
+            titles = ["Listen up!", "Here comes your question"]
         }
         return CPVoiceControlState(
             identifier: VoiceControlStateID.announcement.rawValue,
@@ -220,7 +264,23 @@ class VoiceControlStateManager {
     // ── Waiting (between rounds, round summary, idle) ──────
 
     private func buildWaitingState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Roadtrip Trivia"]
+        var titles: [String]
+        if isShowingRoundSummary {
+            let roundLabel = "Round \(currentRoundNumber): \(summaryRoundScore)/\(summaryRoundTotal)"
+            titles = [
+                "\(teamPrefix)\(roundLabel) | Total: \(totalCorrect)/\(totalAnswered)",
+                "\(roundLabel) | Total: \(totalCorrect)/\(totalAnswered)",
+                "Round Complete"
+            ]
+        } else if hasScore {
+            titles = ["\(teamPrefix)Score: \(scoreLabel)",
+                      "Score: \(scoreLabel)",
+                      "Roadtrip Trivia"]
+        } else if let name = teamName, !name.isEmpty {
+            titles = ["\(name) — Ready?", "Roadtrip Trivia"]
+        } else {
+            titles = ["Ready?", "Roadtrip Trivia"]
+        }
         return CPVoiceControlState(
             identifier: VoiceControlStateID.waiting.rawValue,
             titleVariants: titles,

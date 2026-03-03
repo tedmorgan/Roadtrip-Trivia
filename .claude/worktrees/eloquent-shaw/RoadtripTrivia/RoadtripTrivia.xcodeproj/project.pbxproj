@@ -1,0 +1,457 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10001 /* AppDelegate.swift */; };
+		A10002 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10002 /* SceneDelegate.swift */; };
+		A10004 /* CarPlayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10004 /* CarPlayCoordinator.swift */; };
+		A10006 /* GameViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10006 /* GameViewModel.swift */; };
+		A10007 /* SessionSetupViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10007 /* SessionSetupViewModel.swift */; };
+		A10008 /* GameModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10008 /* GameModels.swift */; };
+		A10009 /* VoiceControlStates.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10009 /* VoiceControlStates.swift */; };
+		A10012 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012 /* AudioSessionManager.swift */; };
+		A10013 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10013 /* LocationService.swift */; };
+		A10015 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10015 /* AuthService.swift */; };
+		A10016 /* SessionPersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10016 /* SessionPersistenceService.swift */; };
+		A10017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10017 /* Assets.xcassets */; };
+		A30001 /* thinking_stinger.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30001 /* thinking_stinger.mp3 */; };
+		A10018 /* GameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10018 /* GameState.swift */; };
+		A10019 /* IPhoneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10019 /* IPhoneViewController.swift */; };
+		A20001 /* RealtimeGameCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001 /* RealtimeGameCoordinator.swift */; };
+		A20002 /* RealtimeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20002 /* RealtimeModels.swift */; };
+		A20003 /* RealtimeSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20003 /* RealtimeSessionManager.swift */; };
+		A20004 /* AudioStreamingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20004 /* AudioStreamingService.swift */; };
+		A20005 /* SystemPromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20005 /* SystemPromptBuilder.swift */; };
+		D7A8E8BF2F535DDE00C9C74A /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000 /* RoadtripTrivia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoadtripTrivia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B10002 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		B10004 /* CarPlayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayCoordinator.swift; sourceTree = "<group>"; };
+		B10006 /* GameViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameViewModel.swift; sourceTree = "<group>"; };
+		B10007 /* SessionSetupViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSetupViewModel.swift; sourceTree = "<group>"; };
+		B10008 /* GameModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameModels.swift; sourceTree = "<group>"; };
+		B10009 /* VoiceControlStates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlStates.swift; sourceTree = "<group>"; };
+		B10012 /* AudioSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionManager.swift; sourceTree = "<group>"; };
+		B10013 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
+		B10015 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		B10016 /* SessionPersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPersistenceService.swift; sourceTree = "<group>"; };
+		B10017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B30001 /* thinking_stinger.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = thinking_stinger.mp3; sourceTree = "<group>"; };
+		B10018 /* GameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameState.swift; sourceTree = "<group>"; };
+		B10019 /* IPhoneViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPhoneViewController.swift; sourceTree = "<group>"; };
+		B10020 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10021 /* RoadtripTrivia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RoadtripTrivia.entitlements; sourceTree = "<group>"; };
+		B20001 /* RealtimeGameCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeGameCoordinator.swift; sourceTree = "<group>"; };
+		B20002 /* RealtimeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeModels.swift; sourceTree = "<group>"; };
+		B20003 /* RealtimeSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionManager.swift; sourceTree = "<group>"; };
+		B20004 /* AudioStreamingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStreamingService.swift; sourceTree = "<group>"; };
+		B20005 /* SystemPromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPromptBuilder.swift; sourceTree = "<group>"; };
+		D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D10000 = {
+			isa = PBXGroup;
+			children = (
+				D10001 /* RoadtripTrivia */,
+				D10099 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D10001 /* RoadtripTrivia */ = {
+			isa = PBXGroup;
+			children = (
+				B10020 /* Info.plist */,
+				B10021 /* RoadtripTrivia.entitlements */,
+				D10002 /* App */,
+				D10003 /* CarPlay */,
+				D10004 /* Models */,
+				D10005 /* ViewModels */,
+				D10006 /* Coordinators */,
+				D10007 /* Services */,
+				D10008 /* iPhone */,
+				D10009 /* Resources */,
+			);
+			path = RoadtripTrivia;
+			sourceTree = "<group>";
+		};
+		D10002 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */,
+				B10001 /* AppDelegate.swift */,
+				B10002 /* SceneDelegate.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		D10003 /* CarPlay */ = {
+			isa = PBXGroup;
+			children = (
+				B10009 /* VoiceControlStates.swift */,
+			);
+			path = CarPlay;
+			sourceTree = "<group>";
+		};
+		D10004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10008 /* GameModels.swift */,
+				B10018 /* GameState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D10005 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				B10006 /* GameViewModel.swift */,
+				B10007 /* SessionSetupViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		D10006 /* Coordinators */ = {
+			isa = PBXGroup;
+			children = (
+				B10004 /* CarPlayCoordinator.swift */,
+				B20001 /* RealtimeGameCoordinator.swift */,
+			);
+			path = Coordinators;
+			sourceTree = "<group>";
+		};
+		D10007 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				D10010 /* Voice */,
+				D10011 /* Location */,
+				D20001 /* Realtime */,
+				D10013 /* Auth */,
+				D10014 /* Persistence */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		D10008 /* iPhone */ = {
+			isa = PBXGroup;
+			children = (
+				B10019 /* IPhoneViewController.swift */,
+			);
+			path = iPhone;
+			sourceTree = "<group>";
+		};
+		D10009 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				B10017 /* Assets.xcassets */,
+				B30001 /* thinking_stinger.mp3 */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		D10010 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				B10012 /* AudioSessionManager.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		D10011 /* Location */ = {
+			isa = PBXGroup;
+			children = (
+				B10013 /* LocationService.swift */,
+			);
+			path = Location;
+			sourceTree = "<group>";
+		};
+		D20001 /* Realtime */ = {
+			isa = PBXGroup;
+			children = (
+				B20002 /* RealtimeModels.swift */,
+				B20003 /* RealtimeSessionManager.swift */,
+				B20004 /* AudioStreamingService.swift */,
+				B20005 /* SystemPromptBuilder.swift */,
+			);
+			path = Realtime;
+			sourceTree = "<group>";
+		};
+		D10013 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				B10015 /* AuthService.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		D10014 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				B10016 /* SessionPersistenceService.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		D10099 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000 /* RoadtripTrivia.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E10001 /* RoadtripTrivia */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10003 /* Build configuration list for PBXNativeTarget "RoadtripTrivia" */;
+			buildPhases = (
+				C10000 /* Sources */,
+				C10001 /* Frameworks */,
+				C10002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RoadtripTrivia;
+			productName = RoadtripTrivia;
+			productReference = B10000 /* RoadtripTrivia.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E10000 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1740;
+				LastUpgradeCheck = 1740;
+				TargetAttributes = {
+					E10001 = {
+						CreatedOnToolsVersion = 17.4;
+					};
+				};
+			};
+			buildConfigurationList = F10001 /* Build configuration list for PBXProject "RoadtripTrivia" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D10000;
+			productRefGroup = D10099 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E10001 /* RoadtripTrivia */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C10002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10017 /* Assets.xcassets in Resources */,
+				A30001 /* thinking_stinger.mp3 in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C10000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10001 /* AppDelegate.swift in Sources */,
+				A10002 /* SceneDelegate.swift in Sources */,
+				D7A8E8BF2F535DDE00C9C74A /* CarPlaySceneDelegate.swift in Sources */,
+				A10004 /* CarPlayCoordinator.swift in Sources */,
+				A20001 /* RealtimeGameCoordinator.swift in Sources */,
+				A10006 /* GameViewModel.swift in Sources */,
+				A10007 /* SessionSetupViewModel.swift in Sources */,
+				A10008 /* GameModels.swift in Sources */,
+				A10009 /* VoiceControlStates.swift in Sources */,
+				A10012 /* AudioSessionManager.swift in Sources */,
+				A10013 /* LocationService.swift in Sources */,
+				A10015 /* AuthService.swift in Sources */,
+				A10016 /* SessionPersistenceService.swift in Sources */,
+				A10018 /* GameState.swift in Sources */,
+				A10019 /* IPhoneViewController.swift in Sources */,
+				A20002 /* RealtimeModels.swift in Sources */,
+				A20003 /* RealtimeSessionManager.swift in Sources */,
+				A20004 /* AudioStreamingService.swift in Sources */,
+				A20005 /* SystemPromptBuilder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		F10010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F10011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F10020 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GL9U974DM2;
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = GL9U974DM2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RoadtripTrivia/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = "";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nagrom.roadtrip;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Roadtrip Trivia Dev";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F10021 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GL9U974DM2;
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = GL9U974DM2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RoadtripTrivia/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = "";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nagrom.roadtrip;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Roadtrip Trivia Dev";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F10001 /* Build configuration list for PBXProject "RoadtripTrivia" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10010 /* Debug */,
+				F10011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10003 /* Build configuration list for PBXNativeTarget "RoadtripTrivia" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10020 /* Debug */,
+				F10021 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E10000 /* Project object */;
+}

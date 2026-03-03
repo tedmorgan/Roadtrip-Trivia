@@ -51,6 +51,9 @@ class RealtimeGameCoordinator: ObservableObject {
     private var questionHistory: [String] = []
     private let questionHistoryKey = "askedQuestionHistory"
 
+    // Bug 23: Track whether user has played before (for first-time instructions)
+    private let hasPlayedBeforeKey = "hasPlayedBefore"
+
     // MARK: - Init
 
     init(gameViewModel: GameViewModel, stateManager: VoiceControlStateManager) {
@@ -72,9 +75,13 @@ class RealtimeGameCoordinator: ObservableObject {
         // Load question history to avoid repeats (Bug 7)
         loadQuestionHistory()
 
+        // Bug 23: Check if this is the user's first game
+        let isFirstGame = !UserDefaults.standard.bool(forKey: hasPlayedBeforeKey)
+
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: locationService.currentLocationLabel,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
+            isFirstGame: isFirstGame
         )
 
         Task { @MainActor in
@@ -115,10 +122,12 @@ class RealtimeGameCoordinator: ObservableObject {
         loadQuestionHistory()
 
         let resumeContext = ResumeContext(from: checkpoint)
+        // Resumed games are never first-time
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: checkpoint.locationLabel,
             resumeContext: resumeContext,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
+            isFirstGame: false
         )
 
         Task { @MainActor in
@@ -164,10 +173,12 @@ class RealtimeGameCoordinator: ObservableObject {
             teamName: teamName
         )
 
+        // Bug 18/23: Pre-configured games are always returning players
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: locationService.currentLocationLabel,
             preconfiguredContext: preconfig,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
+            isFirstGame: false
         )
 
         Task { @MainActor in
@@ -331,6 +342,9 @@ class RealtimeGameCoordinator: ObservableObject {
         // Bug 9: Pass team name to state manager for CarPlay display
         stateManager.setTeamName(args.teamName)
 
+        // Bug 23: Mark that the user has played at least one game
+        UserDefaults.standard.set(true, forKey: hasPlayedBeforeKey)
+
         print("[RealtimeGame] Config set: \(args.playerCount) players, \(args.difficulty), team: \(args.teamName ?? ""), ages: \(args.ageBands)")
 
         submitResult(callId: callId, result: [
@@ -356,6 +370,13 @@ class RealtimeGameCoordinator: ObservableObject {
         }
         currentQuestionIndex = args.questionIndex
 
+        // Bug 26: Play correct/incorrect sound effect
+        if args.isCorrect {
+            playCorrectSound()
+        } else {
+            playIncorrectSound()
+        }
+
         // Bug 21: Dedicated lightning counters — only increment during lightning
         if isLightningRound {
             lightningAnswered += 1
@@ -364,13 +385,16 @@ class RealtimeGameCoordinator: ObservableObject {
             }
         }
 
-        // Bug 20: Track per-round hint/challenge usage
+        // Bug 20/27/28: Track per-round hint/challenge usage with explicit denial
         var actualHint = args.wasHint ?? false
         var actualChallenge = args.wasChallenge ?? false
+        var hintDenied = false
+        var challengeDenied = false
         if actualHint {
             if roundHintsUsed >= maxHintsPerRound {
                 actualHint = false // exceeded limit, don't count
-                print("[RealtimeGame] Hint over limit (\(roundHintsUsed)/\(maxHintsPerRound))")
+                hintDenied = true
+                print("[RealtimeGame] Hint DENIED — over limit (\(roundHintsUsed)/\(maxHintsPerRound))")
             } else {
                 roundHintsUsed += 1
             }
@@ -378,7 +402,8 @@ class RealtimeGameCoordinator: ObservableObject {
         if actualChallenge {
             if roundChallengesUsed >= maxChallengesPerRound {
                 actualChallenge = false
-                print("[RealtimeGame] Challenge over limit (\(roundChallengesUsed)/\(maxChallengesPerRound))")
+                challengeDenied = true
+                print("[RealtimeGame] Challenge DENIED — over limit (\(roundChallengesUsed)/\(maxChallengesPerRound))")
             } else {
                 roundChallengesUsed += 1
             }
@@ -417,8 +442,8 @@ class RealtimeGameCoordinator: ObservableObject {
             )
         }
 
-        // Bug 20: Return hint/challenge limits in result so LLM knows remaining
-        let result: [String: Any] = [
+        // Bug 20/27/28: Return hint/challenge limits and denial info so LLM enforces limits
+        var result: [String: Any] = [
             "acknowledged": true,
             "totalCorrect": totalCorrect,
             "totalAnswered": totalAnswered,
@@ -426,6 +451,16 @@ class RealtimeGameCoordinator: ObservableObject {
             "hintsRemainingThisRound": max(0, maxHintsPerRound - roundHintsUsed),
             "challengesRemainingThisRound": max(0, maxChallengesPerRound - roundChallengesUsed)
         ]
+        // Bug 27: Explicitly tell LLM when a hint was denied
+        if hintDenied {
+            result["hintDenied"] = true
+            result["hintDeniedMessage"] = "HINT DENIED: All \(maxHintsPerRound) hints used this round. Tell the player: Sorry, no more hints this round!"
+        }
+        // Bug 28: Explicitly tell LLM when a challenge was denied
+        if challengeDenied {
+            result["challengeDenied"] = true
+            result["challengeDeniedMessage"] = "CHALLENGE DENIED: The \(maxChallengesPerRound) challenge for this round has been used. Tell the player: No more challenges this round!"
+        }
         submitResult(callId: callId, result: result)
     }
 
@@ -631,10 +666,20 @@ class RealtimeGameCoordinator: ObservableObject {
         print("[RealtimeGame] Lightning round ended")
     }
 
-    // MARK: - Thinking Stinger (AUDIO-01)
+    // MARK: - Sound Effects (AUDIO-01, Bug 26)
 
     private func playThinkingStinger() {
         audioService.playBundledSound(named: "thinking_stinger")
+    }
+
+    /// Bug 26: Play cash register "ching" sound for correct answers
+    private func playCorrectSound() {
+        audioService.playBundledSound(named: "correct_ching")
+    }
+
+    /// Bug 26: Play gong sound for incorrect answers
+    private func playIncorrectSound() {
+        audioService.playBundledSound(named: "incorrect_gong")
     }
 
     // MARK: - Question History (Bug 7)

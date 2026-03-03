@@ -192,6 +192,9 @@ class RealtimeGameCoordinator: ObservableObject {
     func disconnect() {
         lightningTimer?.invalidate()
         lightningTimer = nil
+        lightningEndCutoffWork?.cancel()
+        lightningEndCutoffWork = nil
+        cancellables.removeAll()          // Bug 29/31: prevent duplicate subscriptions on resume
         audioService.stopStreaming()
         sessionManager.disconnect()
         audioManager.deactivate()
@@ -241,6 +244,10 @@ class RealtimeGameCoordinator: ObservableObject {
         case .error(let message, let code):
             print("[RealtimeGame] Error [\(code ?? "?")]: \(message)")
             if message.contains("session_expired") || message.contains("invalid_api_key") {
+                handleNetworkError()
+            } else if code == "reconnect_failed" {
+                // Bug 29/31: All reconnection attempts exhausted — save game and go idle
+                print("[RealtimeGame] Reconnection exhausted — ending session gracefully")
                 handleNetworkError()
             }
 
@@ -378,8 +385,12 @@ class RealtimeGameCoordinator: ObservableObject {
         }
 
         // Track question text for history (Bug 7)
+        // Bug 29: Cap in-memory history to 20 to keep system prompt under token limits
         if let questionText = args.questionText, !questionText.isEmpty {
             questionHistory.append(questionText)
+            if questionHistory.count > 20 {
+                questionHistory = Array(questionHistory.suffix(20))
+            }
             saveQuestionHistory()
         }
 
@@ -500,7 +511,7 @@ class RealtimeGameCoordinator: ObservableObject {
         // Update round label on CarPlay display
         stateManager.updateRound(number: currentRoundNumber, category: currentCategory)
 
-        // Save checkpoint for resume
+        // Bug 30: Save checkpoint off main thread to prevent blocking the UI/WebSocket loop
         let checkpoint = SessionCheckpoint(
             sessionID: gameViewModel.currentSession?.id ?? UUID(),
             roundIndex: args.roundNumber - 1,
@@ -517,7 +528,9 @@ class RealtimeGameCoordinator: ObservableObject {
             teamName: gameViewModel.currentSession?.teamName,
             savedAt: Date()
         )
-        persistence.saveCheckpoint(checkpoint)
+        DispatchQueue.global(qos: .utility).async { [persistence] in
+            persistence.saveCheckpoint(checkpoint)
+        }
 
         submitResult(callId: callId, result: ["saved": true])
     }
@@ -628,16 +641,26 @@ class RealtimeGameCoordinator: ObservableObject {
 
     private func loadQuestionHistory() {
         questionHistory = UserDefaults.standard.stringArray(forKey: questionHistoryKey) ?? []
-        // Bug 7: Keep last 50 questions — shorter list for mini model to process
-        if questionHistory.count > 50 {
-            questionHistory = Array(questionHistory.suffix(50))
+        // Bug 29: Keep only last 20 questions in prompt to prevent token overflow.
+        // Full history stays on disk (up to 200) so questions aren't repeated across sessions.
+        if questionHistory.count > 20 {
+            questionHistory = Array(questionHistory.suffix(20))
         }
         print("[RealtimeGame] Loaded \(questionHistory.count) questions from history")
     }
 
     private func saveQuestionHistory() {
-        let trimmed = Array(questionHistory.suffix(50))
-        UserDefaults.standard.set(trimmed, forKey: questionHistoryKey)
+        // Save up to 200 questions on disk for long-term dedup,
+        // but only send 20 to the LLM via the system prompt.
+        var allHistory = UserDefaults.standard.stringArray(forKey: questionHistoryKey) ?? []
+        // Merge any new questions not already in the full list
+        for q in questionHistory where !allHistory.contains(q) {
+            allHistory.append(q)
+        }
+        if allHistory.count > 200 {
+            allHistory = Array(allHistory.suffix(200))
+        }
+        UserDefaults.standard.set(allHistory, forKey: questionHistoryKey)
     }
 
     // MARK: - Submit Function Result
@@ -655,9 +678,13 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Network Error Recovery
 
     private func handleNetworkError() {
-        // Save state immediately
-        let checkpoint = SessionCheckpoint(session: gameViewModel.currentSession!)
-        persistence.saveCheckpoint(checkpoint)
+        // Bug 29: Guard against nil session to prevent crash
+        if let session = gameViewModel.currentSession {
+            let checkpoint = SessionCheckpoint(session: session)
+            DispatchQueue.global(qos: .utility).async { [persistence] in
+                persistence.saveCheckpoint(checkpoint)
+            }
+        }
 
         audioService.stopStreaming()
         gameViewModel.transition(to: .paused)

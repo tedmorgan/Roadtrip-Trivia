@@ -55,6 +55,10 @@ class AudioStreamingService: ObservableObject {
     /// Allows residual echo to die out.
     private let postPlaybackMuteDelay: TimeInterval = 0.4
 
+    /// Bug 30: Maximum number of audio buffers that can be queued at once.
+    /// Prevents memory exhaustion during long lightning rounds.
+    private let maxScheduledBuffers = 15
+
     // MARK: - Setup
 
     func configure(sessionManager: RealtimeSessionManager) {
@@ -110,6 +114,7 @@ class AudioStreamingService: ObservableObject {
 
         unmuteMicTimer?.cancel()
         unmuteMicTimer = nil
+        cancellables.removeAll()          // Bug 30: prevent duplicate subscriptions on reconfigure
         audioEngine.inputNode.removeTap(onBus: 0)
         playerNode.stop()
         audioEngine.stop()
@@ -243,6 +248,14 @@ class AudioStreamingService: ObservableObject {
             for i in 0..<frameCount {
                 floatData[i] = Float(int16Ptr[i]) / Float(Int16.max)
             }
+        }
+
+        // Bug 30: Drop audio chunks if too many buffers are queued to prevent memory exhaustion
+        bufferLock.lock()
+        let currentCount = scheduledBufferCount
+        bufferLock.unlock()
+        if currentCount >= maxScheduledBuffers {
+            return // Drop this chunk — player won't notice a tiny skip
         }
 
         // Track scheduled buffers so we know when playback is truly done

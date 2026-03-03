@@ -29,7 +29,9 @@ class CarPlayCoordinator: NSObject {
 
     /// Debounce timer for template refreshes to avoid overwhelming CarPlay.
     private var refreshWorkItem: DispatchWorkItem?
-    private let refreshDebounceInterval: TimeInterval = 0.5
+    /// Bug 29: Increased from 0.5 to 1.0 to reduce CarPlay template churn, especially
+    /// during lightning rounds where the timer ticks every second.
+    private let refreshDebounceInterval: TimeInterval = 1.0
 
     // MARK: - Services
     private let persistenceService = SessionPersistenceService.shared

@@ -32,7 +32,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     private var isReconnecting = false  // Guard against parallel reconnect chains
     private var intentionalDisconnect = false  // True when disconnect() called explicitly
     private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 5
+    private let maxReconnectAttempts = 3  // Bug 29: reduce from 5 to avoid prolonged spin
 
     override init() {
         super.init()
@@ -240,14 +240,18 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         }
 
         guard reconnectAttempts < maxReconnectAttempts else {
+            print("[Realtime] Max reconnect attempts (\(maxReconnectAttempts)) reached — giving up")
             connectionError = "Connection lost. Please try again."
+            // Bug 29: Clean up completely so the app isn't stuck in a broken state
+            isReconnecting = false
+            webSocketTask = nil
             eventPublisher.send(.error(message: "Connection lost after \(maxReconnectAttempts) retries", code: "reconnect_failed"))
             return
         }
 
         isReconnecting = true
         reconnectAttempts += 1
-        let delay = min(pow(2.0, Double(reconnectAttempts)), 30.0)
+        let delay = min(pow(2.0, Double(reconnectAttempts)), 15.0) // Bug 29: cap delay at 15s, not 30s
         print("[Realtime] Reconnecting in \(delay)s (attempt \(reconnectAttempts)/\(maxReconnectAttempts), source: \(source))...")
 
         // Clean up old socket
@@ -256,17 +260,16 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         webSocketTask = nil
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, !self.intentionalDisconnect else { return }
+            guard let self, !self.intentionalDisconnect else {
+                self?.isReconnecting = false
+                return
+            }
 
             Task {
                 do {
-                    // Fetch a FRESH ephemeral token — old one may be expired
                     let freshToken = try await self.fetchEphemeralToken(voice: self.currentVoice)
-
-                    // Connect with new token
                     try await self.connectWebSocket(token: freshToken)
 
-                    // Re-send session config so the new session has our prompt + tools
                     if let config = self.currentSessionConfig {
                         try await self.send(.sessionUpdate(config))
                     }
@@ -276,6 +279,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                 } catch {
                     print("[Realtime] Reconnection failed: \(error.localizedDescription)")
                     self.isReconnecting = false
+                    // Bug 29: Non-recursive retry — schedule next attempt via handleDisconnect
                     self.handleDisconnect(source: "reconnect_retry")
                 }
             }

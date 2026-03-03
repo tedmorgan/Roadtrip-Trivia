@@ -165,8 +165,11 @@ struct SystemPromptBuilder {
         """
 
         // Add question history to prevent repeats (Bug 7)
+        // Bug 29: Limit history included in prompt to keep total under ~8 KB and avoid token overflow
         if let history = questionHistory, !history.isEmpty {
-            let historyList = history.suffix(50).joined(separator: "\n- ")
+            let maxHistoryItems = 20
+            let trimmedHistory = Array(history.suffix(maxHistoryItems))
+            let historyList = trimmedHistory.joined(separator: "\n- ")
             prompt += """
 
             PREVIOUSLY ASKED QUESTIONS — DO NOT REPEAT THESE:

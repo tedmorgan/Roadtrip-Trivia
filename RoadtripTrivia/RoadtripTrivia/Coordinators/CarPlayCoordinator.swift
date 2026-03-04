@@ -262,6 +262,12 @@ class CarPlayCoordinator: NSObject {
     private func returnToHome() {
         refreshWorkItem?.cancel()
         refreshWorkItem = nil
+
+        // Bug 37: Save in-progress session to history before tearing down coordinator
+        if let session = gameViewModel.currentSession, session.totalQuestionsAnswered > 0 {
+            persistenceService.saveCompletedSession(session)
+        }
+
         realtimeCoordinator?.disconnect()
         realtimeCoordinator = nil
         playingTemplate = nil
@@ -269,9 +275,13 @@ class CarPlayCoordinator: NSObject {
         stateManager?.reset()
         stateManager = nil
 
-        let freshHome = buildHomeTemplate()
-        interfaceController.popToRootTemplate(animated: true) { [weak self] _, _ in
-            self?.interfaceController.setRootTemplate(freshHome, animated: false, completion: nil)
+        // Bug 37: Small delay to ensure persistence completes before rebuilding home
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            let freshHome = self.buildHomeTemplate()
+            self.interfaceController.popToRootTemplate(animated: true) { [weak self] _, _ in
+                self?.interfaceController.setRootTemplate(freshHome, animated: false, completion: nil)
+            }
         }
     }
 

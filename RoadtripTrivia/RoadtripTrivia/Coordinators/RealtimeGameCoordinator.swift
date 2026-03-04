@@ -120,6 +120,14 @@ class RealtimeGameCoordinator: ObservableObject {
         // Bug 9: Restore team name on CarPlay display
         stateManager.setTeamName(checkpoint.teamName)
 
+        // Bug 32/36: Restore iPhone display properties from checkpoint
+        gameViewModel.displayTotalCorrect = checkpoint.totalScore
+        gameViewModel.displayRoundCorrect = 0
+        gameViewModel.displayRoundNumber = checkpoint.roundIndex + 1
+        gameViewModel.displayCategory = checkpoint.currentCategory
+        gameViewModel.displayTeamName = checkpoint.teamName ?? ""
+        gameViewModel.displayQuestionInRound = checkpoint.questionIndex + 1
+
         // Load question history to avoid repeats (Bug 7)
         loadQuestionHistory()
 
@@ -167,6 +175,8 @@ class RealtimeGameCoordinator: ObservableObject {
         )
 
         stateManager.setTeamName(teamName)
+        // Bug 36: Show team name on iPhone display immediately for replayed games
+        gameViewModel.displayTeamName = teamName ?? ""
         loadQuestionHistory()
 
         let preconfig = PreConfiguredContext(
@@ -374,11 +384,14 @@ class RealtimeGameCoordinator: ObservableObject {
         }
         currentQuestionIndex = args.questionIndex
 
-        // Bug 26: Play correct/incorrect sound effect
-        if args.isCorrect {
-            playCorrectSound()
-        } else {
-            playIncorrectSound()
+        // Bug 26/34: Play correct/incorrect sound effect — but NOT for hints or challenges
+        let isHintOrChallenge = (args.wasHint ?? false) || (args.wasChallenge ?? false)
+        if !isHintOrChallenge {
+            if args.isCorrect {
+                playCorrectSound()
+            } else {
+                playIncorrectSound()
+            }
         }
 
         // Bug 21: Dedicated lightning counters — only increment during lightning

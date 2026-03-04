@@ -109,10 +109,13 @@ struct SystemPromptBuilder {
         - Players can ask for a hint by saying "hint" or "give us a hint"
         - If they ask, give a helpful clue without giving away the answer
         - Only one hint per question, maximum 2 hints per round
-        - The app tracks hint usage. When report_score returns hintsRemainingThisRound=0, \
-          you MUST refuse any further hint requests and say "Sorry, you've used both hints this round!"
-        - When a hint is used, set wasHint=true in report_score
+        - CRITICAL: Before giving ANY hint, you MUST first call report_score with wasHint=true and isCorrect=false \
+          to check if hints are still available. Check the hintsRemainingThisRound in the response. \
+          If hintsRemainingThisRound was already 0 BEFORE your call, the hint is DENIED — tell the player: \
+          "Sorry, you've used all your hints this round!" and do NOT give any clue.
+        - The app enforces the limit. If report_score returns hintDenied=true, you MUST refuse the hint.
         - Do NOT give a hint if the app says hints remaining is 0
+        - Keep your own count: after 2 hints in a round, refuse immediately without even calling report_score
 
         CHALLENGES — STRICT LIMIT: 1 PER ROUND:
         - If a player disagrees with your ruling, they can say "challenge"

@@ -166,11 +166,12 @@ class VoiceControlStateManager {
 
     // ── Listening ──────────────────────────────────────────
 
+    // Bug 33: CarPlay should only show current category — no "Speak your answer" text
     private func buildListeningState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Speak your answer"]
+        let title = currentCategory.isEmpty ? "Roadtrip Trivia" : currentCategory
         return CPVoiceControlState(
             identifier: VoiceControlStateID.listening.rawValue,
-            titleVariants: titles,
+            titleVariants: [title],
             image: UIImage(systemName: "mic.fill"),
             repeats: false
         )

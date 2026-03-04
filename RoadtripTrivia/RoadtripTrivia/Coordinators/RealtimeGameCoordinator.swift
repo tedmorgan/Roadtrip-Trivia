@@ -483,6 +483,27 @@ class RealtimeGameCoordinator: ObservableObject {
             result["challengeDeniedMessage"] = "CHALLENGE DENIED: The \(maxChallengesPerRound) challenge for this round has been used. Tell the player: No more challenges this round!"
         }
         submitResult(callId: callId, result: result)
+
+        // Bug 35: Force-interrupt the LLM if a hint was denied — cancel any in-progress
+        // response (which may already be speaking a hint) and make it announce the denial
+        if hintDenied {
+            Task {
+                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s for result to process
+                try? await sessionManager.send(.responseCancel)
+                try? await sessionManager.send(.responseCreate(
+                    instructions: "STOP. The hint was DENIED by the app — the team has already used all \(maxHintsPerRound) hints this round. Do NOT give any clue. Tell them: Sorry, you've used both hints this round! Then continue with the current question."
+                ))
+            }
+        }
+        if challengeDenied {
+            Task {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                try? await sessionManager.send(.responseCancel)
+                try? await sessionManager.send(.responseCreate(
+                    instructions: "STOP. The challenge was DENIED by the app — the team has already used their challenge this round. Tell them: No more challenges this round! Then move on."
+                ))
+            }
+        }
     }
 
     private func handleGetLocation(callId: String) {

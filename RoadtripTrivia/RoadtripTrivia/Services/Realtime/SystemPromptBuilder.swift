@@ -69,7 +69,7 @@ struct SystemPromptBuilder {
 
         DIFFICULTY LEVELS AVAILABLE:
         - Simple: Multiple choice, family-friendly, lenient grading
-        - Tricky: Free response, easy challenge, reasonably strict grading
+        - Tricky: Multiple choice (A/B/C/D), trickier questions with misdirection, moderate grading
         - Wicked Hard: Free response, genuinely challenging, strict grading
         - Einstein: Free response, expert-level, near-exact answers required
 
@@ -137,8 +137,8 @@ struct SystemPromptBuilder {
           rule does NOT apply. Keep asking questions non-stop until the app sends you a "TIME IS UP" \
           message. You should aim for 15-25+ questions in 2 minutes.
         - IMPORTANT: Lightning Round questions MUST match the game's chosen difficulty level. \
-          If the game is set to Wicked Hard, lightning questions must also be Wicked Hard \
-          (free response, genuinely challenging). If Simple, they should be multiple choice (A/B/C/D). \
+          If the game is set to Wicked Hard or Einstein, lightning questions must also be \
+          free response and genuinely challenging. If Simple or Tricky, they should be multiple choice (A/B/C/D). \
           Do NOT default to easy multiple choice regardless of difficulty.
         - No hints or challenges during Lightning Round
         - Keep the pace fast and exciting — short questions, quick acknowledgments, next question immediately
@@ -224,10 +224,12 @@ struct SystemPromptBuilder {
             - Players: \(preconfig.playerCount)
             - Team name: \(preconfig.teamName ?? "Team")
             - Age groups: \(preconfig.ageBands.map { $0.rawValue }.joined(separator: ", "))
+            - Previous score: \(preconfig.previousTotalCorrect * 100) points from \(preconfig.previousRoundCount) rounds
 
             Do NOT ask the setup questions — call set_game_config immediately with these values. \
             The players already know the rules, so do NOT re-explain them. \
-            Just greet the team by name, say something like "Welcome back! Let's get into it!", \
+            Greet the team by name, mention their previous score \
+            (e.g. "Welcome back \(preconfig.teamName ?? "Team")! Last time you scored \(preconfig.previousTotalCorrect * 100) points. Let's see if you can beat that!"), \
             call get_location, and start Round 1 right away.
             """
         } else {
@@ -258,7 +260,8 @@ struct SystemPromptBuilder {
             2. "What's your team name?" (any fun name they choose — use it throughout the game)
             3. "Any kids playing? What are the ages?" (to determine age groups: kids 6-12, teens 13-17, adults 18+, or mixed)
             4. "What difficulty level would you like? Simple is multiple choice and great for families, \
-               Tricky is free response with a good challenge, Wicked Hard is for serious trivia fans, \
+               Tricky is multiple choice but with trickier questions and some misdirection, \
+               Wicked Hard is free response for serious trivia fans, \
                and Einstein is for true experts."
             \(rulesExplanation)
 
@@ -288,11 +291,13 @@ struct SystemPromptBuilder {
         case .tricky:
             return """
             DIFFICULTY — TRICKY (Moderate Challenge):
-            - Questions are free-response (no multiple choice)
-            - Mix of broad and moderately specific questions
+            - Present every question as multiple choice (A, B, C, D)
+            - Read all four options clearly
+            - RANDOMIZE which letter is the correct answer — distribute evenly across A, B, C, and D
+            - Accept the letter (A/B/C/D) or the full answer text
+            - Questions should be trickier than Simple — include wordplay, misdirection, and moderately specific topics
             - Grading is moderate: accept reasonable variations, alternate names, \
               and close pronunciations (remember answers come through speech recognition)
-            - Include some wordplay and misdirection in questions
             - Keep it family-friendly but engaging for adults
             """
 
@@ -457,4 +462,6 @@ struct PreConfiguredContext {
     let playerCount: Int
     let ageBands: [AgeBand]
     let teamName: String?
+    let previousTotalCorrect: Int
+    let previousRoundCount: Int
 }

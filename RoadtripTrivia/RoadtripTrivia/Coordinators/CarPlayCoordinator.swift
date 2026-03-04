@@ -101,12 +101,15 @@ class CarPlayCoordinator: NSObject {
                     detailText: "\(roundLabel) • \(session.difficulty.rawValue) • \(date)"
                 )
                 // Bug 8/18/22: Tapping a past game starts a new game with the same config
+                // Bug 36: Pass previous score so iPhone display shows it
                 item.handler = { [weak self] _, completion in
                     self?.startNewGameWithConfig(
                         difficulty: session.difficulty,
                         playerCount: session.playerCount,
                         ageBands: session.ageBands,
-                        teamName: session.teamName
+                        teamName: session.teamName,
+                        previousTotalCorrect: session.totalQuestionsCorrect,
+                        previousRoundCount: max(session.rounds.count, (session.totalQuestionsAnswered + 4) / 5)
                     )
                     completion()
                 }
@@ -208,7 +211,9 @@ class CarPlayCoordinator: NSObject {
         difficulty: Difficulty,
         playerCount: Int,
         ageBands: [AgeBand],
-        teamName: String?
+        teamName: String?,
+        previousTotalCorrect: Int = 0,
+        previousRoundCount: Int = 0
     ) {
         pushPlayingTemplate()
         realtimeCoordinator = RealtimeGameCoordinator(
@@ -219,7 +224,9 @@ class CarPlayCoordinator: NSObject {
             difficulty: difficulty,
             playerCount: playerCount,
             ageBands: ageBands,
-            teamName: teamName
+            teamName: teamName,
+            previousTotalCorrect: previousTotalCorrect,
+            previousRoundCount: previousRoundCount
         )
     }
 

@@ -163,7 +163,9 @@ class RealtimeGameCoordinator: ObservableObject {
         difficulty: Difficulty,
         playerCount: Int,
         ageBands: [AgeBand],
-        teamName: String?
+        teamName: String?,
+        previousTotalCorrect: Int = 0,
+        previousRoundCount: Int = 0
     ) {
         gameViewModel.transition(to: .connecting)
         gameViewModel.resetDisplayProperties()
@@ -175,15 +177,22 @@ class RealtimeGameCoordinator: ObservableObject {
         )
 
         stateManager.setTeamName(teamName)
-        // Bug 36: Show team name on iPhone display immediately for replayed games
+        // Bug 36: Show team name and previous score on iPhone display immediately for replayed games
         gameViewModel.displayTeamName = teamName ?? ""
+        if previousTotalCorrect > 0 {
+            totalCorrect = previousTotalCorrect
+            gameViewModel.displayTotalCorrect = previousTotalCorrect
+            gameViewModel.displayRoundNumber = previousRoundCount + 1
+        }
         loadQuestionHistory()
 
         let preconfig = PreConfiguredContext(
             difficulty: difficulty,
             playerCount: playerCount,
             ageBands: ageBands,
-            teamName: teamName
+            teamName: teamName,
+            previousTotalCorrect: previousTotalCorrect,
+            previousRoundCount: previousRoundCount
         )
 
         // Bug 18/23: Pre-configured games are always returning players

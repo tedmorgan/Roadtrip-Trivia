@@ -19,6 +19,15 @@ class IPhoneViewController: UIViewController {
     let colorGoldenYellow = UIColor(red: 0xF4 / 255.0, green: 0xC4 / 255.0, blue: 0x30 / 255.0, alpha: 1.0)
     let colorSkyBlue = UIColor(red: 0x29 / 255.0, green: 0x80 / 255.0, blue: 0xB9 / 255.0, alpha: 1.0)
 
+    // Fun rounded fonts helper
+    private func roundedFont(size: CGFloat, weight: UIFont.Weight) -> UIFont {
+        let systemFont = UIFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = systemFont.fontDescriptor.withDesign(.rounded) {
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        return systemFont
+    }
+
     // MARK: - Views
     private let scrollView = UIScrollView()
     private let contentView = UIView()
@@ -82,7 +91,7 @@ class IPhoneViewController: UIViewController {
 
         let titleView = UILabel()
         titleView.text = "Roadtrip Trivia"
-        titleView.font = .systemFont(ofSize: 18, weight: .bold)
+        titleView.font = roundedFont(size: 22, weight: .heavy)
         titleView.textColor = colorGoldenYellow
         navigationItem.titleView = titleView
 
@@ -127,21 +136,22 @@ class IPhoneViewController: UIViewController {
         appIconView.clipsToBounds = true
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.text = "ROADTRIP TRIVIA"
-        titleLabel.font = .systemFont(ofSize: 34, weight: .bold)
+        titleLabel.text = "ROADTRIP\nTRIVIA"
+        titleLabel.font = roundedFont(size: 52, weight: .heavy)
         titleLabel.textColor = .white
         titleLabel.textAlignment = .center
+        titleLabel.numberOfLines = 0
 
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         subtitleLabel.text = "Your CarPlay trivia adventure"
-        subtitleLabel.font = .systemFont(ofSize: 17)
+        subtitleLabel.font = roundedFont(size: 22, weight: .medium)
         subtitleLabel.textColor = colorSkyBlue
         subtitleLabel.textAlignment = .center
 
         idleMessageLabel.translatesAutoresizingMaskIntoConstraints = false
-        idleMessageLabel.text = "Connect to CarPlay to start playing!"
-        idleMessageLabel.font = .systemFont(ofSize: 17)
-        idleMessageLabel.textColor = .white
+        idleMessageLabel.text = "Connect to CarPlay\nto start playing!"
+        idleMessageLabel.font = roundedFont(size: 24, weight: .semibold)
+        idleMessageLabel.textColor = colorGoldenYellow
         idleMessageLabel.textAlignment = .center
         idleMessageLabel.numberOfLines = 0
 
@@ -175,50 +185,54 @@ class IPhoneViewController: UIViewController {
         playingContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(playingContainer)
 
-        // Team name
+        // Team name — BIG and fun
         teamNameLabel.translatesAutoresizingMaskIntoConstraints = false
-        teamNameLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        teamNameLabel.font = roundedFont(size: 48, weight: .heavy)
         teamNameLabel.textColor = colorGoldenYellow
         teamNameLabel.textAlignment = .center
+        teamNameLabel.adjustsFontSizeToFitWidth = true
+        teamNameLabel.minimumScaleFactor = 0.7
 
-        // Round label
+        // Round label — large and bold
         roundLabel.translatesAutoresizingMaskIntoConstraints = false
-        roundLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        roundLabel.font = roundedFont(size: 38, weight: .bold)
         roundLabel.textColor = .white
         roundLabel.textAlignment = .center
 
-        // Category
+        // Category — readable and colorful
         categoryLabel.translatesAutoresizingMaskIntoConstraints = false
-        categoryLabel.font = .systemFont(ofSize: 16)
+        categoryLabel.font = roundedFont(size: 24, weight: .medium)
         categoryLabel.textColor = colorSkyBlue
         categoryLabel.textAlignment = .center
-        categoryLabel.numberOfLines = 1
+        categoryLabel.numberOfLines = 2
+        categoryLabel.adjustsFontSizeToFitWidth = true
+        categoryLabel.minimumScaleFactor = 0.8
 
         playingContainer.addSubview(teamNameLabel)
         playingContainer.addSubview(roundLabel)
         playingContainer.addSubview(categoryLabel)
 
-        // Score card
+        // Score card — full width, bigger padding
         scoreCardView.translatesAutoresizingMaskIntoConstraints = false
-        scoreCardView.backgroundColor = UIColor.white.withAlphaComponent(0.1)
-        scoreCardView.layer.cornerRadius = 12
-        scoreCardView.layer.borderWidth = 1
-        scoreCardView.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
+        scoreCardView.backgroundColor = UIColor.white.withAlphaComponent(0.12)
+        scoreCardView.layer.cornerRadius = 20
+        scoreCardView.layer.borderWidth = 1.5
+        scoreCardView.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
         playingContainer.addSubview(scoreCardView)
 
-        // Score labels
+        // Score labels — all much bigger
         questionLabel.translatesAutoresizingMaskIntoConstraints = false
-        questionLabel.font = .systemFont(ofSize: 17)
+        questionLabel.font = roundedFont(size: 30, weight: .semibold)
         questionLabel.textColor = .white
         questionLabel.textAlignment = .center
 
         roundPointsLabel.translatesAutoresizingMaskIntoConstraints = false
-        roundPointsLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        roundPointsLabel.font = roundedFont(size: 36, weight: .heavy)
         roundPointsLabel.textColor = colorGoldenYellow
         roundPointsLabel.textAlignment = .center
 
         totalPointsLabel.translatesAutoresizingMaskIntoConstraints = false
-        totalPointsLabel.font = .systemFont(ofSize: 17)
+        totalPointsLabel.font = roundedFont(size: 28, weight: .bold)
         totalPointsLabel.textColor = .white
         totalPointsLabel.textAlignment = .center
 
@@ -227,79 +241,75 @@ class IPhoneViewController: UIViewController {
         scoreCardView.addSubview(totalPointsLabel)
 
         NSLayoutConstraint.activate([
-            playingContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 40),
+            playingContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             playingContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             playingContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            teamNameLabel.topAnchor.constraint(equalTo: playingContainer.topAnchor),
-            teamNameLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 20),
-            teamNameLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -20),
+            teamNameLabel.topAnchor.constraint(equalTo: playingContainer.topAnchor, constant: 10),
+            teamNameLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
+            teamNameLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
-            roundLabel.topAnchor.constraint(equalTo: teamNameLabel.bottomAnchor, constant: 8),
-            roundLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 20),
-            roundLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -20),
+            roundLabel.topAnchor.constraint(equalTo: teamNameLabel.bottomAnchor, constant: 6),
+            roundLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
+            roundLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
             categoryLabel.topAnchor.constraint(equalTo: roundLabel.bottomAnchor, constant: 4),
-            categoryLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 20),
-            categoryLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -20),
+            categoryLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
+            categoryLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
             scoreCardView.topAnchor.constraint(equalTo: categoryLabel.bottomAnchor, constant: 24),
-            scoreCardView.centerXAnchor.constraint(equalTo: playingContainer.centerXAnchor),
-            scoreCardView.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
-            scoreCardView.leadingAnchor.constraint(greaterThanOrEqualTo: playingContainer.leadingAnchor, constant: 20),
-            scoreCardView.trailingAnchor.constraint(lessThanOrEqualTo: playingContainer.trailingAnchor, constant: -20),
+            scoreCardView.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
+            scoreCardView.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
-            questionLabel.topAnchor.constraint(equalTo: scoreCardView.topAnchor, constant: 16),
-            questionLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 16),
-            questionLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -16),
+            questionLabel.topAnchor.constraint(equalTo: scoreCardView.topAnchor, constant: 20),
+            questionLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 20),
+            questionLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -20),
 
-            roundPointsLabel.topAnchor.constraint(equalTo: questionLabel.bottomAnchor, constant: 12),
-            roundPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 16),
-            roundPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -16),
+            roundPointsLabel.topAnchor.constraint(equalTo: questionLabel.bottomAnchor, constant: 14),
+            roundPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 20),
+            roundPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -20),
 
-            totalPointsLabel.topAnchor.constraint(equalTo: roundPointsLabel.bottomAnchor, constant: 8),
-            totalPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 16),
-            totalPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -16),
-            totalPointsLabel.bottomAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: -16),
+            totalPointsLabel.topAnchor.constraint(equalTo: roundPointsLabel.bottomAnchor, constant: 10),
+            totalPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 20),
+            totalPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -20),
+            totalPointsLabel.bottomAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: -20),
         ])
     }
 
     private func setupLightningCard() {
         lightningCardView.translatesAutoresizingMaskIntoConstraints = false
         lightningCardView.backgroundColor = colorCrimsonRed
-        lightningCardView.layer.cornerRadius = 12
+        lightningCardView.layer.cornerRadius = 20
         playingContainer.addSubview(lightningCardView)
 
         let lightningLabelView = UILabel()
         lightningLabelView.translatesAutoresizingMaskIntoConstraints = false
         lightningLabelView.text = "⚡ LIGHTNING ROUND"
-        lightningLabelView.font = .systemFont(ofSize: 18, weight: .bold)
+        lightningLabelView.font = roundedFont(size: 28, weight: .heavy)
         lightningLabelView.textColor = .white
         lightningLabelView.textAlignment = .center
         lightningCardView.addSubview(lightningLabelView)
 
         lightningTimerLabel.translatesAutoresizingMaskIntoConstraints = false
         lightningTimerLabel.text = "2:00"
-        lightningTimerLabel.font = UIFont(name: "Menlo", size: 48) ?? .monospacedDigitSystemFont(ofSize: 48, weight: .bold)
+        lightningTimerLabel.font = .monospacedDigitSystemFont(ofSize: 80, weight: .bold)
         lightningTimerLabel.textColor = .white
         lightningTimerLabel.textAlignment = .center
         lightningCardView.addSubview(lightningTimerLabel)
 
         NSLayoutConstraint.activate([
             lightningCardView.topAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: 24),
-            lightningCardView.centerXAnchor.constraint(equalTo: playingContainer.centerXAnchor),
-            lightningCardView.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
-            lightningCardView.leadingAnchor.constraint(greaterThanOrEqualTo: playingContainer.leadingAnchor, constant: 20),
-            lightningCardView.trailingAnchor.constraint(lessThanOrEqualTo: playingContainer.trailingAnchor, constant: -20),
+            lightningCardView.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
+            lightningCardView.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
-            lightningLabelView.topAnchor.constraint(equalTo: lightningCardView.topAnchor, constant: 16),
-            lightningLabelView.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 16),
-            lightningLabelView.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -16),
+            lightningLabelView.topAnchor.constraint(equalTo: lightningCardView.topAnchor, constant: 20),
+            lightningLabelView.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 20),
+            lightningLabelView.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -20),
 
-            lightningTimerLabel.topAnchor.constraint(equalTo: lightningLabelView.bottomAnchor, constant: 12),
-            lightningTimerLabel.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 16),
-            lightningTimerLabel.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -16),
-            lightningTimerLabel.bottomAnchor.constraint(equalTo: lightningCardView.bottomAnchor, constant: -16),
+            lightningTimerLabel.topAnchor.constraint(equalTo: lightningLabelView.bottomAnchor, constant: 10),
+            lightningTimerLabel.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 20),
+            lightningTimerLabel.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -20),
+            lightningTimerLabel.bottomAnchor.constraint(equalTo: lightningCardView.bottomAnchor, constant: -20),
         ])
 
         lightningCardView.isHidden = true

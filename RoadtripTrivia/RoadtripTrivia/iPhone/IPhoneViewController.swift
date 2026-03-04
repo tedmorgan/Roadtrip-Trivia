@@ -6,18 +6,22 @@ import AVFoundation
 /// iPhone companion screen showing game status during play and auth/setup when idle.
 /// All gameplay happens on CarPlay; iPhone shows team name, round, score, and lightning timer.
 /// Auth and settings are hidden behind a gear icon in the nav bar.
+/// Visual theme: retro arcade / synthwave with neon glow effects.
 class IPhoneViewController: UIViewController {
 
     private let gameViewModel = GameViewModel.shared
     private let authService = AuthService.shared
     private var cancellables = Set<AnyCancellable>()
 
-    // MARK: - Color Scheme (from app icon)
-    let colorNavyBlue = UIColor(red: 0x1B / 255.0, green: 0x3A / 255.0, blue: 0x6B / 255.0, alpha: 1.0)
-    let colorDarkBlue = UIColor(red: 0x0F / 255.0, green: 0x24 / 255.0, blue: 0x47 / 255.0, alpha: 1.0)
-    let colorCrimsonRed = UIColor(red: 0xC0 / 255.0, green: 0x39 / 255.0, blue: 0x2B / 255.0, alpha: 1.0)
-    let colorGoldenYellow = UIColor(red: 0xF4 / 255.0, green: 0xC4 / 255.0, blue: 0x30 / 255.0, alpha: 1.0)
-    let colorSkyBlue = UIColor(red: 0x29 / 255.0, green: 0x80 / 255.0, blue: 0xB9 / 255.0, alpha: 1.0)
+    // MARK: - Arcade Color Palette
+    let colorDeepPurple = UIColor(red: 0x1A / 255.0, green: 0x0A / 255.0, blue: 0x2E / 255.0, alpha: 1.0)
+    let colorDarkVoid = UIColor(red: 0x0D / 255.0, green: 0x02 / 255.0, blue: 0x21 / 255.0, alpha: 1.0)
+    let colorNeonPink = UIColor(red: 0xFF / 255.0, green: 0x2D / 255.0, blue: 0x95 / 255.0, alpha: 1.0)
+    let colorNeonYellow = UIColor(red: 0xFF / 255.0, green: 0xE0 / 255.0, blue: 0x00 / 255.0, alpha: 1.0)
+    let colorNeonCyan = UIColor(red: 0x00 / 255.0, green: 0xFF / 255.0, blue: 0xFF / 255.0, alpha: 1.0)
+    let colorNeonGreen = UIColor(red: 0x00 / 255.0, green: 0xFF / 255.0, blue: 0x65 / 255.0, alpha: 1.0)
+    let colorNeonOrange = UIColor(red: 0xFF / 255.0, green: 0x6B / 255.0, blue: 0x00 / 255.0, alpha: 1.0)
+    let colorGridPurple = UIColor(red: 0x6B / 255.0, green: 0x00 / 255.0, blue: 0xCC / 255.0, alpha: 1.0)
 
     // Fun rounded fonts helper
     private func roundedFont(size: CGFloat, weight: UIFont.Weight) -> UIFont {
@@ -28,9 +32,18 @@ class IPhoneViewController: UIViewController {
         return systemFont
     }
 
+    // Neon glow helper
+    private func applyNeonGlow(to view: UIView, color: UIColor, radius: CGFloat = 12, opacity: Float = 0.9) {
+        view.layer.shadowColor = color.cgColor
+        view.layer.shadowRadius = radius
+        view.layer.shadowOpacity = opacity
+        view.layer.shadowOffset = .zero
+    }
+
     // MARK: - Views
     private let scrollView = UIScrollView()
     private let contentView = UIView()
+    private let gridView = UIView() // synthwave grid background
 
     // Idle state views
     private let appIconView = UIImageView()
@@ -50,6 +63,7 @@ class IPhoneViewController: UIViewController {
 
     // Lightning card (appears only during lightning round)
     private let lightningCardView = UIView()
+    private let lightningHeaderLabel = UILabel()
     private let lightningTimerLabel = UILabel()
 
     // MARK: - Lifecycle
@@ -58,8 +72,9 @@ class IPhoneViewController: UIViewController {
         super.viewDidLoad()
         print("[IPhoneViewController] viewDidLoad called")
 
-        view.backgroundColor = colorNavyBlue
+        view.backgroundColor = colorDarkVoid
         setupGradientBackground()
+        setupSynthwaveGrid()
         setupNavigationBar()
         setupScrollView()
         setupIdleStateViews()
@@ -73,27 +88,87 @@ class IPhoneViewController: UIViewController {
         print("[IPhoneViewController] viewDidLoad complete")
     }
 
-    // MARK: - Setup
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Resize gradient to match view
+        if let gradient = view.layer.sublayers?.first as? CAGradientLayer {
+            gradient.frame = view.bounds
+        }
+        // Resize grid
+        gridView.frame = view.bounds
+        if let gridLayer = gridView.layer.sublayers?.first as? CAShapeLayer {
+            gridLayer.frame = view.bounds
+            gridLayer.path = createGridPath(in: view.bounds).cgPath
+        }
+    }
+
+    // MARK: - Background Setup
 
     private func setupGradientBackground() {
         let gradient = CAGradientLayer()
-        gradient.colors = [colorNavyBlue.cgColor, colorDarkBlue.cgColor]
+        gradient.colors = [
+            colorDeepPurple.cgColor,
+            colorDarkVoid.cgColor,
+            UIColor(red: 0x15, green: 0x00, blue: 0x30, alpha: 1.0).cgColor
+        ]
+        gradient.locations = [0.0, 0.5, 1.0]
         gradient.startPoint = CGPoint(x: 0.5, y: 0)
         gradient.endPoint = CGPoint(x: 0.5, y: 1)
         gradient.frame = view.bounds
         view.layer.insertSublayer(gradient, at: 0)
     }
 
+    private func setupSynthwaveGrid() {
+        gridView.frame = view.bounds
+        gridView.isUserInteractionEnabled = false
+        view.addSubview(gridView)
+
+        let gridLayer = CAShapeLayer()
+        gridLayer.frame = view.bounds
+        gridLayer.path = createGridPath(in: view.bounds).cgPath
+        gridLayer.strokeColor = colorGridPurple.withAlphaComponent(0.3).cgColor
+        gridLayer.fillColor = UIColor.clear.cgColor
+        gridLayer.lineWidth = 0.8
+        gridView.layer.addSublayer(gridLayer)
+    }
+
+    private func createGridPath(in bounds: CGRect) -> UIBezierPath {
+        let path = UIBezierPath()
+        let spacing: CGFloat = 40
+
+        // Horizontal lines (bottom half only for synthwave horizon feel)
+        let startY = bounds.height * 0.55
+        var y = startY
+        while y < bounds.height {
+            path.move(to: CGPoint(x: 0, y: y))
+            path.addLine(to: CGPoint(x: bounds.width, y: y))
+            y += spacing
+        }
+
+        // Vertical lines with perspective convergence
+        let horizonY = bounds.height * 0.55
+        let vanishX = bounds.width / 2.0
+        let numLines = 11
+        let bottomSpacing = bounds.width / CGFloat(numLines - 1)
+
+        for i in 0..<numLines {
+            let bottomX = CGFloat(i) * bottomSpacing
+            path.move(to: CGPoint(x: vanishX, y: horizonY))
+            path.addLine(to: CGPoint(x: bottomX, y: bounds.height))
+        }
+
+        return path
+    }
+
+    // MARK: - Navigation Bar
+
     private func setupNavigationBar() {
         navigationController?.navigationBar.barStyle = .black
-        navigationController?.navigationBar.barTintColor = colorNavyBlue
+        navigationController?.navigationBar.barTintColor = colorDarkVoid
         navigationController?.navigationBar.isTranslucent = false
 
-        let titleView = UILabel()
-        titleView.text = "Roadtrip Trivia"
-        titleView.font = roundedFont(size: 22, weight: .heavy)
-        titleView.textColor = colorGoldenYellow
-        navigationItem.titleView = titleView
+        // No title in nav bar — the big neon title is in the content
+        navigationItem.titleView = UIView()
 
         let gearButton = UIBarButtonItem(
             image: UIImage(systemName: "gearshape.fill"),
@@ -101,7 +176,7 @@ class IPhoneViewController: UIViewController {
             target: self,
             action: #selector(showAccountSettings)
         )
-        gearButton.tintColor = colorGoldenYellow
+        gearButton.tintColor = colorNeonYellow
         navigationItem.rightBarButtonItem = gearButton
     }
 
@@ -128,32 +203,37 @@ class IPhoneViewController: UIViewController {
         ])
     }
 
+    // MARK: - Idle State (before game starts)
+
     private func setupIdleStateViews() {
         appIconView.translatesAutoresizingMaskIntoConstraints = false
         appIconView.image = UIImage(named: "AppIcon") ?? UIImage(systemName: "car.fill")
         appIconView.contentMode = .scaleAspectFit
-        appIconView.layer.cornerRadius = 60
+        appIconView.layer.cornerRadius = 30
         appIconView.clipsToBounds = true
+        applyNeonGlow(to: appIconView, color: colorNeonPink, radius: 20, opacity: 0.8)
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.text = "ROADTRIP\nTRIVIA"
         titleLabel.font = roundedFont(size: 52, weight: .heavy)
-        titleLabel.textColor = .white
+        titleLabel.textColor = colorNeonPink
         titleLabel.textAlignment = .center
         titleLabel.numberOfLines = 0
+        applyNeonGlow(to: titleLabel, color: colorNeonPink, radius: 20, opacity: 0.8)
 
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         subtitleLabel.text = "Your CarPlay trivia adventure"
         subtitleLabel.font = roundedFont(size: 22, weight: .medium)
-        subtitleLabel.textColor = colorSkyBlue
+        subtitleLabel.textColor = colorNeonCyan
         subtitleLabel.textAlignment = .center
 
         idleMessageLabel.translatesAutoresizingMaskIntoConstraints = false
         idleMessageLabel.text = "Connect to CarPlay\nto start playing!"
-        idleMessageLabel.font = roundedFont(size: 24, weight: .semibold)
-        idleMessageLabel.textColor = colorGoldenYellow
+        idleMessageLabel.font = roundedFont(size: 26, weight: .bold)
+        idleMessageLabel.textColor = colorNeonYellow
         idleMessageLabel.textAlignment = .center
         idleMessageLabel.numberOfLines = 0
+        applyNeonGlow(to: idleMessageLabel, color: colorNeonYellow, radius: 15, opacity: 0.7)
 
         contentView.addSubview(appIconView)
         contentView.addSubview(titleLabel)
@@ -161,48 +241,52 @@ class IPhoneViewController: UIViewController {
         contentView.addSubview(idleMessageLabel)
 
         NSLayoutConstraint.activate([
-            appIconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 60),
+            appIconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 40),
             appIconView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            appIconView.widthAnchor.constraint(equalToConstant: 120),
-            appIconView.heightAnchor.constraint(equalToConstant: 120),
+            appIconView.widthAnchor.constraint(equalToConstant: 100),
+            appIconView.heightAnchor.constraint(equalToConstant: 100),
 
-            titleLabel.topAnchor.constraint(equalTo: appIconView.bottomAnchor, constant: 40),
+            titleLabel.topAnchor.constraint(equalTo: appIconView.bottomAnchor, constant: 30),
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
             subtitleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             subtitleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
-            idleMessageLabel.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 40),
+            idleMessageLabel.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 50),
             idleMessageLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             idleMessageLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
             idleMessageLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
         ])
     }
 
+    // MARK: - Playing State
+
     private func setupPlayingStateViews() {
         playingContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(playingContainer)
 
-        // Team name — BIG and fun
+        // Team name — BIG neon yellow with glow
         teamNameLabel.translatesAutoresizingMaskIntoConstraints = false
-        teamNameLabel.font = roundedFont(size: 48, weight: .heavy)
-        teamNameLabel.textColor = colorGoldenYellow
+        teamNameLabel.font = roundedFont(size: 52, weight: .heavy)
+        teamNameLabel.textColor = colorNeonYellow
         teamNameLabel.textAlignment = .center
         teamNameLabel.adjustsFontSizeToFitWidth = true
-        teamNameLabel.minimumScaleFactor = 0.7
+        teamNameLabel.minimumScaleFactor = 0.6
+        applyNeonGlow(to: teamNameLabel, color: colorNeonYellow, radius: 18, opacity: 0.8)
 
-        // Round label — large and bold
+        // Round label — neon pink
         roundLabel.translatesAutoresizingMaskIntoConstraints = false
-        roundLabel.font = roundedFont(size: 38, weight: .bold)
-        roundLabel.textColor = .white
+        roundLabel.font = roundedFont(size: 40, weight: .heavy)
+        roundLabel.textColor = colorNeonPink
         roundLabel.textAlignment = .center
+        applyNeonGlow(to: roundLabel, color: colorNeonPink, radius: 14, opacity: 0.7)
 
-        // Category — readable and colorful
+        // Category — neon cyan
         categoryLabel.translatesAutoresizingMaskIntoConstraints = false
-        categoryLabel.font = roundedFont(size: 24, weight: .medium)
-        categoryLabel.textColor = colorSkyBlue
+        categoryLabel.font = roundedFont(size: 24, weight: .semibold)
+        categoryLabel.textColor = colorNeonCyan
         categoryLabel.textAlignment = .center
         categoryLabel.numberOfLines = 2
         categoryLabel.adjustsFontSizeToFitWidth = true
@@ -212,28 +296,32 @@ class IPhoneViewController: UIViewController {
         playingContainer.addSubview(roundLabel)
         playingContainer.addSubview(categoryLabel)
 
-        // Score card — full width, bigger padding
+        // Score card — dark with neon cyan border + glow
         scoreCardView.translatesAutoresizingMaskIntoConstraints = false
-        scoreCardView.backgroundColor = UIColor.white.withAlphaComponent(0.12)
-        scoreCardView.layer.cornerRadius = 20
-        scoreCardView.layer.borderWidth = 1.5
-        scoreCardView.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        scoreCardView.backgroundColor = colorDarkVoid.withAlphaComponent(0.85)
+        scoreCardView.layer.cornerRadius = 16
+        scoreCardView.layer.borderWidth = 2
+        scoreCardView.layer.borderColor = colorNeonCyan.cgColor
+        applyNeonGlow(to: scoreCardView, color: colorNeonCyan, radius: 16, opacity: 0.6)
         playingContainer.addSubview(scoreCardView)
 
-        // Score labels — all much bigger
+        // Question label — white, big
         questionLabel.translatesAutoresizingMaskIntoConstraints = false
-        questionLabel.font = roundedFont(size: 30, weight: .semibold)
+        questionLabel.font = roundedFont(size: 32, weight: .bold)
         questionLabel.textColor = .white
         questionLabel.textAlignment = .center
 
+        // Round points — neon green, huge
         roundPointsLabel.translatesAutoresizingMaskIntoConstraints = false
-        roundPointsLabel.font = roundedFont(size: 36, weight: .heavy)
-        roundPointsLabel.textColor = colorGoldenYellow
+        roundPointsLabel.font = roundedFont(size: 38, weight: .heavy)
+        roundPointsLabel.textColor = colorNeonGreen
         roundPointsLabel.textAlignment = .center
+        applyNeonGlow(to: roundPointsLabel, color: colorNeonGreen, radius: 10, opacity: 0.6)
 
+        // Total points — neon yellow
         totalPointsLabel.translatesAutoresizingMaskIntoConstraints = false
-        totalPointsLabel.font = roundedFont(size: 28, weight: .bold)
-        totalPointsLabel.textColor = .white
+        totalPointsLabel.font = roundedFont(size: 30, weight: .bold)
+        totalPointsLabel.textColor = colorNeonYellow
         totalPointsLabel.textAlignment = .center
 
         scoreCardView.addSubview(questionLabel)
@@ -241,15 +329,15 @@ class IPhoneViewController: UIViewController {
         scoreCardView.addSubview(totalPointsLabel)
 
         NSLayoutConstraint.activate([
-            playingContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
+            playingContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             playingContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             playingContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            teamNameLabel.topAnchor.constraint(equalTo: playingContainer.topAnchor, constant: 10),
+            teamNameLabel.topAnchor.constraint(equalTo: playingContainer.topAnchor, constant: 8),
             teamNameLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
             teamNameLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
-            roundLabel.topAnchor.constraint(equalTo: teamNameLabel.bottomAnchor, constant: 6),
+            roundLabel.topAnchor.constraint(equalTo: teamNameLabel.bottomAnchor, constant: 4),
             roundLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
             roundLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
@@ -257,59 +345,64 @@ class IPhoneViewController: UIViewController {
             categoryLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
             categoryLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
-            scoreCardView.topAnchor.constraint(equalTo: categoryLabel.bottomAnchor, constant: 24),
-            scoreCardView.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
-            scoreCardView.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
+            scoreCardView.topAnchor.constraint(equalTo: categoryLabel.bottomAnchor, constant: 20),
+            scoreCardView.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 20),
+            scoreCardView.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -20),
 
-            questionLabel.topAnchor.constraint(equalTo: scoreCardView.topAnchor, constant: 20),
-            questionLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 20),
-            questionLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -20),
+            questionLabel.topAnchor.constraint(equalTo: scoreCardView.topAnchor, constant: 18),
+            questionLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 16),
+            questionLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -16),
 
-            roundPointsLabel.topAnchor.constraint(equalTo: questionLabel.bottomAnchor, constant: 14),
-            roundPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 20),
-            roundPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -20),
+            roundPointsLabel.topAnchor.constraint(equalTo: questionLabel.bottomAnchor, constant: 12),
+            roundPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 16),
+            roundPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -16),
 
-            totalPointsLabel.topAnchor.constraint(equalTo: roundPointsLabel.bottomAnchor, constant: 10),
-            totalPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 20),
-            totalPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -20),
-            totalPointsLabel.bottomAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: -20),
+            totalPointsLabel.topAnchor.constraint(equalTo: roundPointsLabel.bottomAnchor, constant: 8),
+            totalPointsLabel.leadingAnchor.constraint(equalTo: scoreCardView.leadingAnchor, constant: 16),
+            totalPointsLabel.trailingAnchor.constraint(equalTo: scoreCardView.trailingAnchor, constant: -16),
+            totalPointsLabel.bottomAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: -18),
         ])
     }
 
+    // MARK: - Lightning Round Card
+
     private func setupLightningCard() {
         lightningCardView.translatesAutoresizingMaskIntoConstraints = false
-        lightningCardView.backgroundColor = colorCrimsonRed
-        lightningCardView.layer.cornerRadius = 20
+        lightningCardView.backgroundColor = UIColor(red: 0x3D / 255.0, green: 0x00 / 255.0, blue: 0x00 / 255.0, alpha: 0.9)
+        lightningCardView.layer.cornerRadius = 16
+        lightningCardView.layer.borderWidth = 2.5
+        lightningCardView.layer.borderColor = colorNeonOrange.cgColor
+        applyNeonGlow(to: lightningCardView, color: colorNeonOrange, radius: 20, opacity: 0.8)
         playingContainer.addSubview(lightningCardView)
 
-        let lightningLabelView = UILabel()
-        lightningLabelView.translatesAutoresizingMaskIntoConstraints = false
-        lightningLabelView.text = "⚡ LIGHTNING ROUND"
-        lightningLabelView.font = roundedFont(size: 28, weight: .heavy)
-        lightningLabelView.textColor = .white
-        lightningLabelView.textAlignment = .center
-        lightningCardView.addSubview(lightningLabelView)
+        lightningHeaderLabel.translatesAutoresizingMaskIntoConstraints = false
+        lightningHeaderLabel.text = "⚡ LIGHTNING ROUND"
+        lightningHeaderLabel.font = roundedFont(size: 30, weight: .heavy)
+        lightningHeaderLabel.textColor = colorNeonOrange
+        lightningHeaderLabel.textAlignment = .center
+        lightningCardView.addSubview(lightningHeaderLabel)
 
         lightningTimerLabel.translatesAutoresizingMaskIntoConstraints = false
         lightningTimerLabel.text = "2:00"
-        lightningTimerLabel.font = .monospacedDigitSystemFont(ofSize: 80, weight: .bold)
+        lightningTimerLabel.font = .monospacedDigitSystemFont(ofSize: 86, weight: .bold)
         lightningTimerLabel.textColor = .white
         lightningTimerLabel.textAlignment = .center
+        applyNeonGlow(to: lightningTimerLabel, color: colorNeonOrange, radius: 20, opacity: 0.9)
         lightningCardView.addSubview(lightningTimerLabel)
 
         NSLayoutConstraint.activate([
-            lightningCardView.topAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: 24),
-            lightningCardView.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
-            lightningCardView.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
+            lightningCardView.topAnchor.constraint(equalTo: scoreCardView.bottomAnchor, constant: 20),
+            lightningCardView.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 20),
+            lightningCardView.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -20),
 
-            lightningLabelView.topAnchor.constraint(equalTo: lightningCardView.topAnchor, constant: 20),
-            lightningLabelView.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 20),
-            lightningLabelView.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -20),
+            lightningHeaderLabel.topAnchor.constraint(equalTo: lightningCardView.topAnchor, constant: 16),
+            lightningHeaderLabel.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 16),
+            lightningHeaderLabel.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -16),
 
-            lightningTimerLabel.topAnchor.constraint(equalTo: lightningLabelView.bottomAnchor, constant: 10),
-            lightningTimerLabel.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 20),
-            lightningTimerLabel.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -20),
-            lightningTimerLabel.bottomAnchor.constraint(equalTo: lightningCardView.bottomAnchor, constant: -20),
+            lightningTimerLabel.topAnchor.constraint(equalTo: lightningHeaderLabel.bottomAnchor, constant: 8),
+            lightningTimerLabel.leadingAnchor.constraint(equalTo: lightningCardView.leadingAnchor, constant: 16),
+            lightningTimerLabel.trailingAnchor.constraint(equalTo: lightningCardView.trailingAnchor, constant: -16),
+            lightningTimerLabel.bottomAnchor.constraint(equalTo: lightningCardView.bottomAnchor, constant: -16),
         ])
 
         lightningCardView.isHidden = true

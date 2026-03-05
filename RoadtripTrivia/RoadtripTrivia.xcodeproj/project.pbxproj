@@ -19,9 +19,6 @@
 		A10015 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10015 /* AuthService.swift */; };
 		A10016 /* SessionPersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10016 /* SessionPersistenceService.swift */; };
 		A10017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10017 /* Assets.xcassets */; };
-		A30001 /* thinking_stinger.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30001 /* thinking_stinger.mp3 */; };
-		A30002 /* correct_ching.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30002 /* correct_ching.mp3 */; };
-		A30003 /* incorrect_gong.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30003 /* incorrect_gong.mp3 */; };
 		A10018 /* GameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10018 /* GameState.swift */; };
 		A10019 /* IPhoneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10019 /* IPhoneViewController.swift */; };
 		A20001 /* RealtimeGameCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001 /* RealtimeGameCoordinator.swift */; };
@@ -29,11 +26,14 @@
 		A20003 /* RealtimeSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20003 /* RealtimeSessionManager.swift */; };
 		A20004 /* AudioStreamingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20004 /* AudioStreamingService.swift */; };
 		A20005 /* SystemPromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20005 /* SystemPromptBuilder.swift */; };
+		A30001 /* thinking_stinger.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30001 /* thinking_stinger.mp3 */; };
+		A30002 /* correct_ching.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30002 /* correct_ching.mp3 */; };
+		A30003 /* incorrect_gong.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30003 /* incorrect_gong.mp3 */; };
 		D7A8E8BF2F535DDE00C9C74A /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B10000 /* RoadtripTrivia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoadtripTrivia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000 /* Roadtrip Trivia for CarPlay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Roadtrip Trivia for CarPlay.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B10002 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		B10004 /* CarPlayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayCoordinator.swift; sourceTree = "<group>"; };
@@ -46,9 +46,6 @@
 		B10015 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		B10016 /* SessionPersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPersistenceService.swift; sourceTree = "<group>"; };
 		B10017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B30001 /* thinking_stinger.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = thinking_stinger.mp3; sourceTree = "<group>"; };
-		B30002 /* correct_ching.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = correct_ching.mp3; sourceTree = "<group>"; };
-		B30003 /* incorrect_gong.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = incorrect_gong.mp3; sourceTree = "<group>"; };
 		B10018 /* GameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameState.swift; sourceTree = "<group>"; };
 		B10019 /* IPhoneViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPhoneViewController.swift; sourceTree = "<group>"; };
 		B10020 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -58,6 +55,9 @@
 		B20003 /* RealtimeSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionManager.swift; sourceTree = "<group>"; };
 		B20004 /* AudioStreamingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStreamingService.swift; sourceTree = "<group>"; };
 		B20005 /* SystemPromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPromptBuilder.swift; sourceTree = "<group>"; };
+		B30001 /* thinking_stinger.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = thinking_stinger.mp3; sourceTree = "<group>"; };
+		B30002 /* correct_ching.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = correct_ching.mp3; sourceTree = "<group>"; };
+		B30003 /* incorrect_gong.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = incorrect_gong.mp3; sourceTree = "<group>"; };
 		D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -189,17 +189,6 @@
 			path = Location;
 			sourceTree = "<group>";
 		};
-		D20001 /* Realtime */ = {
-			isa = PBXGroup;
-			children = (
-				B20002 /* RealtimeModels.swift */,
-				B20003 /* RealtimeSessionManager.swift */,
-				B20004 /* AudioStreamingService.swift */,
-				B20005 /* SystemPromptBuilder.swift */,
-			);
-			path = Realtime;
-			sourceTree = "<group>";
-		};
 		D10013 /* Auth */ = {
 			isa = PBXGroup;
 			children = (
@@ -219,9 +208,20 @@
 		D10099 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				B10000 /* RoadtripTrivia.app */,
+				B10000 /* Roadtrip Trivia for CarPlay.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D20001 /* Realtime */ = {
+			isa = PBXGroup;
+			children = (
+				B20002 /* RealtimeModels.swift */,
+				B20003 /* RealtimeSessionManager.swift */,
+				B20004 /* AudioStreamingService.swift */,
+				B20005 /* SystemPromptBuilder.swift */,
+			);
+			path = Realtime;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -241,7 +241,7 @@
 			);
 			name = RoadtripTrivia;
 			productName = RoadtripTrivia;
-			productReference = B10000 /* RoadtripTrivia.app */;
+			productReference = B10000 /* Roadtrip Trivia for CarPlay.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -382,7 +382,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -397,7 +397,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nagrom.roadtrip;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Roadtrip Trivia for CarPlay";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Roadtrip Trivia Dev";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -414,7 +414,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -429,7 +429,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nagrom.roadtrip;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Roadtrip Trivia for CarPlay";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Roadtrip Trivia Dev";
 				SWIFT_EMIT_LOC_STRINGS = YES;

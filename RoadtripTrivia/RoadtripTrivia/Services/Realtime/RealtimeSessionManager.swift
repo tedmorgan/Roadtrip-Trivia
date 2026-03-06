@@ -29,10 +29,12 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     private var currentVoice: String = "alloy"
     private var currentSessionConfig: SessionConfig?
     private var isReceiving = false
-    private var isReconnecting = false  // Guard against parallel reconnect chains
-    private var intentionalDisconnect = false  // True when disconnect() called explicitly
+    private var isReconnecting = false
+    private var intentionalDisconnect = false
     private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 3  // Bug 29: reduce from 5 to avoid prolonged spin
+    private let maxReconnectAttempts = 3
+
+    private let apiLogger = APIUsageLogger.shared
 
     override init() {
         super.init()
@@ -70,15 +72,21 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             throw RealtimeError.notConnected
         }
         let data = try event.toData()
-        // IMPORTANT: OpenAI Realtime API expects TEXT WebSocket frames, not binary
         guard let jsonString = String(data: data, encoding: .utf8) else {
             throw RealtimeError.sendFailed("Could not encode event as UTF-8 string")
         }
-        // Bug 31: Log outgoing event types for diagnostics
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let eventType = json["type"] as? String,
-           !eventType.contains("audio_buffer") {
-            print("[Realtime] Sending: \(eventType)")
+           let eventType = json["type"] as? String {
+            if !eventType.contains("audio_buffer") {
+                print("[Realtime] Sending: \(eventType)")
+                if eventType == "session.update" {
+                    let promptLen = (json["session"] as? [String: Any])?["instructions"] as? String
+                    let toolCount = ((json["session"] as? [String: Any])?["tools"] as? [[String: Any]])?.count ?? 0
+                    apiLogger.logSessionUpdate(promptLength: promptLen?.count ?? 0, toolCount: toolCount)
+                } else {
+                    apiLogger.logOutgoingEvent(type: eventType, payloadBytes: data.count)
+                }
+            }
         }
         try await ws.send(.string(jsonString))
     }
@@ -98,6 +106,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         isConnected = false
         currentSessionConfig = nil
         print("[Realtime] Disconnected")
+        apiLogger.logConnection(event: "Disconnected")
     }
 
     /// Submit a function call result back to the model, then trigger a response.
@@ -166,6 +175,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         isConnected = true
         reconnectAttempts = 0
         print("[Realtime] WebSocket connected")
+        apiLogger.logConnection(event: "WebSocket connected")
     }
 
     private func waitForSessionCreated(timeout: TimeInterval) async throws -> Bool {
@@ -208,14 +218,12 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             return
         }
 
-        // Bug 31: Log raw event type for diagnostics
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let eventType = json["type"] as? String {
-            // Only log non-audio events to avoid flooding the console
             if !eventType.contains("audio.delta") && !eventType.contains("audio_buffer") {
                 print("[Realtime] Event: \(eventType)")
+                apiLogger.logIncomingEvent(type: eventType, payloadBytes: data.count)
             }
-            // Log response.done status to diagnose empty responses
             if eventType == "response.done",
                let response = json["response"] as? [String: Any] {
                 let status = response["status"] as? String ?? "?"
@@ -224,6 +232,21 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                     ?? statusDetails?["error"] as? String
                     ?? (statusDetails.map { "\($0)" } ?? "none")
                 print("[Realtime] Response status: \(status), details: \(reason)")
+
+                var usage: ResponseUsage?
+                if let usageDict = response["usage"] as? [String: Any] {
+                    let inputTokens = usageDict["input_tokens"] as? Int
+                        ?? usageDict["total_tokens"] as? Int ?? 0
+                    let outputTokens = usageDict["output_tokens"] as? Int ?? 0
+                    let totalTokens = usageDict["total_tokens"] as? Int
+                        ?? (inputTokens + outputTokens)
+                    usage = ResponseUsage(
+                        inputTokens: inputTokens,
+                        outputTokens: outputTokens,
+                        totalTokens: totalTokens
+                    )
+                }
+                apiLogger.logResponseDone(status: status, usage: usage)
             }
         }
 

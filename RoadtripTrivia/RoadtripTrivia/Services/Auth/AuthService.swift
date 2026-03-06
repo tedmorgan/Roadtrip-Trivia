@@ -1,5 +1,6 @@
 import Foundation
 import AuthenticationServices
+import SafariServices
 
 /// Manages authentication via Supabase Auth.
 /// Per PRD AUTH-01: Sign in with Apple, email magic link, email/password, Google, Facebook.
@@ -174,6 +175,69 @@ class AuthService: NSObject, ObservableObject {
                 completion(ok, ok ? nil : "Failed to send magic link")
             }
         }.resume()
+    }
+
+    // MARK: - Google Sign-In (AUTH-01, OAuth via Supabase)
+
+    /// Google Sign-In using Supabase OAuth flow.
+    /// Opens an in-app browser for Google authentication, then exchanges the
+    /// callback token with Supabase.
+    func signInWithGoogle(presentingViewController: UIViewController, completion: @escaping (Bool, String?) -> Void) {
+        let redirectURL = "\(supabaseURL)/auth/v1/callback"
+        guard let url = URL(string: "\(supabaseURL)/auth/v1/authorize?provider=google&redirect_to=\(redirectURL)") else {
+            completion(false, "Invalid URL")
+            return
+        }
+
+        let safariVC = SFSafariViewController(url: url)
+        safariVC.modalPresentationStyle = .formSheet
+        presentingViewController.present(safariVC, animated: true)
+
+        googleSignInCompletion = completion
+        googleSafariVC = safariVC
+    }
+
+    private var googleSignInCompletion: ((Bool, String?) -> Void)?
+    private weak var googleSafariVC: SFSafariViewController?
+
+    /// Handle the OAuth callback URL from Google Sign-In.
+    /// Call this from your SceneDelegate/AppDelegate URL handler.
+    func handleGoogleCallback(url: URL) {
+        googleSafariVC?.dismiss(animated: true)
+
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let fragment = components.fragment else {
+            googleSignInCompletion?(false, "Invalid callback URL")
+            googleSignInCompletion = nil
+            return
+        }
+
+        let params = fragment.split(separator: "&").reduce(into: [String: String]()) { result, pair in
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            if parts.count == 2 {
+                result[String(parts[0])] = String(parts[1])
+            }
+        }
+
+        guard let accessToken = params["access_token"],
+              let refreshToken = params["refresh_token"] else {
+            googleSignInCompletion?(false, "Missing tokens in callback")
+            googleSignInCompletion = nil
+            return
+        }
+
+        saveToKeychain(key: "accessToken", value: accessToken)
+        saveToKeychain(key: "refreshToken", value: refreshToken)
+
+        currentToken = accessToken
+        currentUserID = decodeUserIdFromJWT(accessToken)
+        if let userId = currentUserID {
+            saveToKeychain(key: "userId", value: userId)
+        }
+        isAuthenticated = true
+        print("[Auth] Google sign-in successful — user: \(currentUserID ?? "unknown")")
+        googleSignInCompletion?(true, nil)
+        googleSignInCompletion = nil
     }
 
     // MARK: - Silent Token Refresh (AUTH-02, UC-32)

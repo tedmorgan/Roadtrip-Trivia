@@ -140,10 +140,10 @@ class VoiceControlStateManager {
 
     private var hasScore: Bool { totalAnswered > 0 }
 
-    /// Short team prefix like "Quizzards: " or empty
-    private var teamPrefix: String {
-        guard let name = teamName, !name.isEmpty else { return "" }
-        return "\(name): "
+    /// Team name or app name for CarPlay display
+    private var displayTitle: String {
+        if let name = teamName, !name.isEmpty { return name }
+        return "Roadtrip Trivia"
     }
 
     private var scoreLabel: String {
@@ -166,12 +166,10 @@ class VoiceControlStateManager {
 
     // ── Listening ──────────────────────────────────────────
 
-    // Bug 33: CarPlay should only show current category — no "Speak your answer" text
     private func buildListeningState() -> CPVoiceControlState {
-        let title = currentCategory.isEmpty ? "Roadtrip Trivia" : currentCategory
         return CPVoiceControlState(
             identifier: VoiceControlStateID.listening.rawValue,
-            titleVariants: [title],
+            titleVariants: [displayTitle],
             image: UIImage(systemName: "mic.fill"),
             repeats: false
         )
@@ -180,10 +178,9 @@ class VoiceControlStateManager {
     // ── Processing ─────────────────────────────────────────
 
     private func buildProcessingState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Thinking..."]
         return CPVoiceControlState(
             identifier: VoiceControlStateID.processing.rawValue,
-            titleVariants: titles,
+            titleVariants: [displayTitle, "Thinking..."],
             image: UIImage(systemName: "brain.head.profile"),
             repeats: false
         )
@@ -192,10 +189,9 @@ class VoiceControlStateManager {
     // ── Result ─────────────────────────────────────────────
 
     private func buildResultState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Result"]
         return CPVoiceControlState(
             identifier: VoiceControlStateID.result.rawValue,
-            titleVariants: titles,
+            titleVariants: [displayTitle],
             image: UIImage(systemName: "checkmark.circle"),
             repeats: false
         )
@@ -206,9 +202,9 @@ class VoiceControlStateManager {
     private func buildAnnouncementState() -> CPVoiceControlState {
         let titles: [String]
         if isLightningActive {
-            titles = ["⚡ Lightning Round", "Lightning"]
+            titles = ["⚡ Lightning Round", displayTitle]
         } else {
-            titles = [currentCategory, "Roadtrip Trivia"]
+            titles = [displayTitle, "Roadtrip Trivia"]
         }
         return CPVoiceControlState(
             identifier: VoiceControlStateID.announcement.rawValue,
@@ -221,10 +217,9 @@ class VoiceControlStateManager {
     // ── Waiting (between rounds, round summary, idle) ──────
 
     private func buildWaitingState() -> CPVoiceControlState {
-        let titles: [String] = [currentCategory, "Roadtrip Trivia"]
         return CPVoiceControlState(
             identifier: VoiceControlStateID.waiting.rawValue,
-            titleVariants: titles,
+            titleVariants: [displayTitle, "Roadtrip Trivia"],
             image: UIImage(systemName: "car.fill"),
             repeats: false
         )

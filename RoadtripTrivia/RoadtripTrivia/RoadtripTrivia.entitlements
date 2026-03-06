@@ -4,5 +4,9 @@
 <dict>
 	<key>com.apple.developer.carplay-voice-based-conversation</key>
 	<true/>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
 </dict>
 </plist>

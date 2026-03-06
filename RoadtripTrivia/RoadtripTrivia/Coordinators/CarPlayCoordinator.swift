@@ -92,12 +92,12 @@ class CarPlayCoordinator: NSObject {
             let historyItems: [CPListItem] = recentGames.map { session in
                 let team = session.teamName ?? "Game"
                 let date = DateFormatter.shortDate.string(from: session.lastPlayedAt)
-                // Bug 16: Use totalQuestionsAnswered to derive round count more accurately.
-                // Each standard round has ~5 questions; this avoids depending on rounds array.
                 let roundCount = max(session.rounds.count, (session.totalQuestionsAnswered + 4) / 5)
                 let roundLabel = roundCount == 1 ? "1 round" : "\(roundCount) rounds"
+                let points = session.totalQuestionsCorrect * session.difficulty.pointsPerCorrect
+                let formattedPoints = NumberFormatter.localizedString(from: NSNumber(value: points), number: .decimal)
                 let item = CPListItem(
-                    text: "\(team) — \(session.totalQuestionsCorrect)/\(session.totalQuestionsAnswered)",
+                    text: "\(team) — \(formattedPoints) pts",
                     detailText: "\(roundLabel) • \(session.difficulty.rawValue) • \(date)"
                 )
                 // Bug 8/18/22: Tapping a past game starts a new game with the same config
@@ -180,8 +180,10 @@ class CarPlayCoordinator: NSObject {
         let session = gameViewModel.currentSession
         guard let session else { return }
 
+        let totalPoints = session.totalQuestionsCorrect * session.difficulty.pointsPerCorrect
+        let formattedPoints = NumberFormatter.localizedString(from: NSNumber(value: totalPoints), number: .decimal)
         let items = [
-            CPListItem(text: "Total Score", detailText: "\(session.totalQuestionsCorrect)/\(session.totalQuestionsAnswered)"),
+            CPListItem(text: "Total Score", detailText: "\(formattedPoints) pts"),
             CPListItem(text: "Rounds Played", detailText: "\(session.rounds.count)"),
             CPListItem(text: "Hints Used", detailText: "\(session.hintsUsed)"),
             CPListItem(text: "Challenges", detailText: "\(session.challengesUsed)")

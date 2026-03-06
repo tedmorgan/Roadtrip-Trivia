@@ -68,10 +68,11 @@ struct SystemPromptBuilder {
         - Location: \(location)
 
         DIFFICULTY LEVELS AVAILABLE:
-        - Simple: Multiple choice, family-friendly, lenient grading
-        - Tricky: Multiple choice (A/B/C/D), trickier questions with misdirection, moderate grading
-        - Wicked Hard: Free response, genuinely challenging, strict grading
-        - Einstein: Free response, expert-level, near-exact answers required
+        - Simple: Multiple choice, family-friendly, lenient grading — 100 points per correct answer
+        - Tricky: Multiple choice (A/B/C/D), trickier questions with misdirection, moderate grading — 200 points per correct answer
+        - Wicked Hard: Free response, genuinely challenging, strict grading — 300 points per correct answer
+        - Einstein: Free response, expert-level, near-exact answers required — 400 points per correct answer
+        When announcing scores, use the correct point value for the chosen difficulty level.
 
         Once the player chooses a difficulty, follow these grading rules:
         \(difficultySection(.simple))
@@ -91,10 +92,15 @@ struct SystemPromptBuilder {
         - After all 5 questions, give a round summary with score and some banter, then ask "Want to keep going?"
         - If they say yes, start a new round. NEVER end the game unless the player explicitly says "stop" or "end game."
 
-        MULTIPLE CHOICE (Simple difficulty):
+        MULTIPLE CHOICE (Simple and Tricky difficulty):
         - When presenting multiple choice questions, ALWAYS present exactly 4 options (A, B, C, D).
-        - RANDOMIZE which option is the correct answer. Distribute correct answers evenly across all \
-          four positions. Never put the correct answer on A or B more than twice in a row.
+        - CRITICAL RANDOMIZATION RULE: Before each question, pick where the correct answer goes using \
+          this rotation pattern for a 5-question round: use each of A, B, C, D at least once, with the \
+          5th being any letter. For example: C, A, D, B, C or D, B, A, C, D.
+        - You MUST place the correct answer on C or D at least as often as A or B. LLMs have a known \
+          bias toward A and B — actively fight this by defaulting to C or D when in doubt.
+        - NEVER put the correct answer on A or B more than twice in a round of 5 questions.
+        - Track your placements: after each question, verify you haven't over-used A or B.
         - All four options should be plausible — avoid obviously wrong choices.
 
         MULTI-PLAYER ANSWER HANDLING:
@@ -181,18 +187,20 @@ struct SystemPromptBuilder {
         - Keep track of which question number you're on (1 through 5) within each round
         """
 
-        // Add question history to prevent repeats (Bug 7)
-        // Bug 29: Limit history included in prompt to keep total under ~8 KB and avoid token overflow
         if let history = questionHistory, !history.isEmpty {
-            let maxHistoryItems = 20
+            let maxHistoryItems = 50
             let trimmedHistory = Array(history.suffix(maxHistoryItems))
             let historyList = trimmedHistory.joined(separator: "\n- ")
             prompt += """
 
             PREVIOUSLY ASKED QUESTIONS — DO NOT REPEAT THESE:
             - \(historyList)
-            Generate completely new and different questions. Never reuse any question from this list, \
-            even paraphrased or with slight variations.
+            STRICT DEDUPLICATION RULES:
+            - Never reuse any question from the list above, even paraphrased or with slight variations.
+            - Do NOT ask questions about the same specific fact, person, place, or event as any listed question.
+            - If a listed question is about "the year the Mayflower arrived," do NOT ask about the \
+              Mayflower's arrival in any form.
+            - Generate completely new questions on different topics and facts.
             """
         }
 
@@ -224,12 +232,13 @@ struct SystemPromptBuilder {
             - Players: \(preconfig.playerCount)
             - Team name: \(preconfig.teamName ?? "Team")
             - Age groups: \(preconfig.ageBands.map { $0.rawValue }.joined(separator: ", "))
-            - Previous score: \(preconfig.previousTotalCorrect * 100) points from \(preconfig.previousRoundCount) rounds
+            - Previous score: \(preconfig.previousTotalCorrect * preconfig.difficulty.pointsPerCorrect) points from \(preconfig.previousRoundCount) rounds
+            - Points per correct answer: \(preconfig.difficulty.pointsPerCorrect)
 
             Do NOT ask the setup questions — call set_game_config immediately with these values. \
             The players already know the rules, so do NOT re-explain them. \
             Greet the team by name, mention their previous score \
-            (e.g. "Welcome back \(preconfig.teamName ?? "Team")! Last time you scored \(preconfig.previousTotalCorrect * 100) points. Let's see if you can beat that!"), \
+            (e.g. "Welcome back \(preconfig.teamName ?? "Team")! Last time you scored \(preconfig.previousTotalCorrect * preconfig.difficulty.pointsPerCorrect) points. Let's see if you can beat that!"), \
             call get_location, and start Round 1 right away.
             """
         } else {
@@ -281,7 +290,9 @@ struct SystemPromptBuilder {
             DIFFICULTY — SIMPLE (Family-Friendly):
             - Present every question as multiple choice (A, B, C, D)
             - Read all four options clearly
-            - RANDOMIZE which letter is the correct answer — distribute evenly across A, B, C, and D
+            - RANDOMIZE which letter is the correct answer — use each of A, B, C, D at least once per \
+              5-question round. Place the correct answer on C or D at least as often as A or B. \
+              If you notice you've put the answer on A or B twice already, the next MUST be C or D.
             - Accept the letter (A/B/C/D) or the full answer text
             - Grading is lenient: close enough counts, accept reasonable variations
             - Questions should be accessible to all ages
@@ -293,7 +304,9 @@ struct SystemPromptBuilder {
             DIFFICULTY — TRICKY (Moderate Challenge):
             - Present every question as multiple choice (A, B, C, D)
             - Read all four options clearly
-            - RANDOMIZE which letter is the correct answer — distribute evenly across A, B, C, and D
+            - RANDOMIZE which letter is the correct answer — use each of A, B, C, D at least once per \
+              5-question round. Place the correct answer on C or D at least as often as A or B. \
+              If you notice you've put the answer on A or B twice already, the next MUST be C or D.
             - Accept the letter (A/B/C/D) or the full answer text
             - Questions should be trickier than Simple — include wordplay, misdirection, and moderately specific topics
             - Grading is moderate: accept reasonable variations, alternate names, \

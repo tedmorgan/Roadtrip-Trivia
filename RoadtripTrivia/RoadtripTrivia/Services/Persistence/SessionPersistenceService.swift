@@ -47,10 +47,13 @@ class SessionPersistenceService: ObservableObject {
     // MARK: - Full Session Persistence
 
     /// Save a completed session for history/analytics.
+    /// Deduplicates by session ID to prevent the same game appearing multiple times.
     func saveCompletedSession(_ session: TriviaSession) {
         var history = loadSessionHistory()
+        if history.contains(where: { $0.id == session.id }) {
+            return
+        }
         history.append(session)
-        // Keep last 50 sessions
         if history.count > 50 {
             history = Array(history.suffix(50))
         }

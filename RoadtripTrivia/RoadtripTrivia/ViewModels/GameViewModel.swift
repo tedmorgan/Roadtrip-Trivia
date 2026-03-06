@@ -29,9 +29,12 @@ class GameViewModel: ObservableObject {
     @Published var displayTotalCorrect: Int = 0
     @Published var lightningSecondsRemaining: Int? = nil // nil = not in lightning
 
-    // Computed helpers for score display (100 pts per correct answer)
-    var roundPoints: Int { displayRoundCorrect * 100 }
-    var totalPoints: Int { displayTotalCorrect * 100 }
+    var roundPoints: Int { displayRoundCorrect * currentPointsMultiplier }
+    var totalPoints: Int { displayTotalCorrect * currentPointsMultiplier }
+
+    var currentPointsMultiplier: Int {
+        currentSession?.difficulty.pointsPerCorrect ?? 100
+    }
 
     var currentRound: TriviaRound? {
         guard let session = currentSession,

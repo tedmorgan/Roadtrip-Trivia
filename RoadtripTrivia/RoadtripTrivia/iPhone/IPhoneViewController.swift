@@ -53,6 +53,7 @@ class IPhoneViewController: UIViewController {
 
     // Playing state views (stacked in a container)
     private let playingContainer = UIView()
+    private let playingAppTitleLabel = UILabel()
     private let teamNameLabel = UILabel()
     private let roundLabel = UILabel()
     private let categoryLabel = UILabel()
@@ -267,6 +268,13 @@ class IPhoneViewController: UIViewController {
         playingContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(playingContainer)
 
+        // Compact app title shown during gameplay
+        playingAppTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        playingAppTitleLabel.text = "Roadtrip Trivia"
+        playingAppTitleLabel.font = roundedFont(size: 18, weight: .semibold)
+        playingAppTitleLabel.textColor = colorNeonPink.withAlphaComponent(0.8)
+        playingAppTitleLabel.textAlignment = .center
+
         // Team name — BIG neon yellow with glow
         teamNameLabel.translatesAutoresizingMaskIntoConstraints = false
         teamNameLabel.font = roundedFont(size: 52, weight: .heavy)
@@ -292,6 +300,7 @@ class IPhoneViewController: UIViewController {
         categoryLabel.adjustsFontSizeToFitWidth = true
         categoryLabel.minimumScaleFactor = 0.8
 
+        playingContainer.addSubview(playingAppTitleLabel)
         playingContainer.addSubview(teamNameLabel)
         playingContainer.addSubview(roundLabel)
         playingContainer.addSubview(categoryLabel)
@@ -333,7 +342,11 @@ class IPhoneViewController: UIViewController {
             playingContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             playingContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            teamNameLabel.topAnchor.constraint(equalTo: playingContainer.topAnchor, constant: 8),
+            playingAppTitleLabel.topAnchor.constraint(equalTo: playingContainer.topAnchor, constant: 4),
+            playingAppTitleLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
+            playingAppTitleLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
+
+            teamNameLabel.topAnchor.constraint(equalTo: playingAppTitleLabel.bottomAnchor, constant: 2),
             teamNameLabel.leadingAnchor.constraint(equalTo: playingContainer.leadingAnchor, constant: 16),
             teamNameLabel.trailingAnchor.constraint(equalTo: playingContainer.trailingAnchor, constant: -16),
 
@@ -377,9 +390,11 @@ class IPhoneViewController: UIViewController {
 
         lightningHeaderLabel.translatesAutoresizingMaskIntoConstraints = false
         lightningHeaderLabel.text = "⚡ LIGHTNING ROUND"
-        lightningHeaderLabel.font = roundedFont(size: 30, weight: .heavy)
+        lightningHeaderLabel.font = roundedFont(size: 26, weight: .heavy)
         lightningHeaderLabel.textColor = colorNeonOrange
         lightningHeaderLabel.textAlignment = .center
+        lightningHeaderLabel.adjustsFontSizeToFitWidth = true
+        lightningHeaderLabel.minimumScaleFactor = 0.7
         lightningCardView.addSubview(lightningHeaderLabel)
 
         lightningTimerLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -465,9 +480,19 @@ class IPhoneViewController: UIViewController {
         playingContainer.isHidden = !isPlaying
     }
 
+    private static let pointsFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        return f
+    }()
+
+    private func formattedPoints(_ value: Int) -> String {
+        Self.pointsFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
     private func updateScoreDisplay() {
-        roundPointsLabel.text = "Round     \(gameViewModel.roundPoints) pts"
-        totalPointsLabel.text = "Total     \(gameViewModel.totalPoints) pts"
+        roundPointsLabel.text = "Round     \(formattedPoints(gameViewModel.roundPoints)) pts"
+        totalPointsLabel.text = "Total     \(formattedPoints(gameViewModel.totalPoints)) pts"
     }
 
     private func updateLightningDisplay(_ seconds: Int?) {
@@ -511,6 +536,10 @@ class AccountSettingsSheet: UIViewController {
     let authService: AuthService
     private var isAuthenticated = false
 
+    private let emailField = UITextField()
+    private let passwordField = UITextField()
+    private let statusLabel = UILabel()
+
     init(authService: AuthService) {
         self.authService = authService
         super.init(nibName: nil, bundle: nil)
@@ -528,18 +557,127 @@ class AccountSettingsSheet: UIViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissSheet))
 
         isAuthenticated = authService.isAuthenticated
+
+        let scrollView = UIScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.alwaysBounceVertical = true
+        view.addSubview(scrollView)
+
         let stack = UIStackView()
         stack.axis = .vertical
         stack.spacing = 16
         stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 20),
+            stack.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: scrollView.bottomAnchor, constant: -20),
+        ])
 
         if !isAuthenticated {
+            // Apple Sign In
             let appleButton = ASAuthorizationAppleIDButton(type: .signIn, style: .black)
             appleButton.addTarget(self, action: #selector(handleSignInWithApple), for: .touchUpInside)
             appleButton.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(appleButton)
-            NSLayoutConstraint.activate([appleButton.widthAnchor.constraint(equalToConstant: 280)])
+            NSLayoutConstraint.activate([
+                appleButton.widthAnchor.constraint(equalToConstant: 280),
+                appleButton.heightAnchor.constraint(equalToConstant: 44),
+            ])
+
+            // Google Sign In
+            let googleButton = UIButton(configuration: .filled())
+            googleButton.setTitle("Sign in with Google", for: .normal)
+            googleButton.setImage(UIImage(systemName: "g.circle.fill"), for: .normal)
+            googleButton.tintColor = .white
+            googleButton.configuration?.baseBackgroundColor = UIColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
+            googleButton.addTarget(self, action: #selector(handleSignInWithGoogle), for: .touchUpInside)
+            googleButton.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(googleButton)
+            NSLayoutConstraint.activate([
+                googleButton.widthAnchor.constraint(equalToConstant: 280),
+                googleButton.heightAnchor.constraint(equalToConstant: 44),
+            ])
+
+            // Divider
+            let dividerStack = UIStackView()
+            dividerStack.axis = .horizontal
+            dividerStack.spacing = 12
+            dividerStack.alignment = .center
+            dividerStack.translatesAutoresizingMaskIntoConstraints = false
+
+            let leftLine = UIView()
+            leftLine.backgroundColor = .separator
+            leftLine.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([leftLine.heightAnchor.constraint(equalToConstant: 1)])
+
+            let orLabel = UILabel()
+            orLabel.text = "or"
+            orLabel.textColor = .secondaryLabel
+            orLabel.font = .systemFont(ofSize: 14)
+
+            let rightLine = UIView()
+            rightLine.backgroundColor = .separator
+            rightLine.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([rightLine.heightAnchor.constraint(equalToConstant: 1)])
+
+            dividerStack.addArrangedSubview(leftLine)
+            dividerStack.addArrangedSubview(orLabel)
+            dividerStack.addArrangedSubview(rightLine)
+            NSLayoutConstraint.activate([
+                leftLine.widthAnchor.constraint(equalToConstant: 100),
+                rightLine.widthAnchor.constraint(equalToConstant: 100),
+            ])
+            stack.addArrangedSubview(dividerStack)
+
+            // Email field
+            emailField.placeholder = "Email"
+            emailField.borderStyle = .roundedRect
+            emailField.keyboardType = .emailAddress
+            emailField.autocapitalizationType = .none
+            emailField.autocorrectionType = .no
+            emailField.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(emailField)
+            NSLayoutConstraint.activate([emailField.widthAnchor.constraint(equalToConstant: 280)])
+
+            // Password field
+            passwordField.placeholder = "Password"
+            passwordField.borderStyle = .roundedRect
+            passwordField.isSecureTextEntry = true
+            passwordField.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(passwordField)
+            NSLayoutConstraint.activate([passwordField.widthAnchor.constraint(equalToConstant: 280)])
+
+            // Sign In button
+            let signInButton = UIButton(configuration: .filled())
+            signInButton.setTitle("Sign In", for: .normal)
+            signInButton.addTarget(self, action: #selector(handleEmailSignIn), for: .touchUpInside)
+            signInButton.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(signInButton)
+            NSLayoutConstraint.activate([signInButton.widthAnchor.constraint(equalToConstant: 280)])
+
+            // Sign Up button
+            let signUpButton = UIButton(configuration: .tinted())
+            signUpButton.setTitle("Create Account", for: .normal)
+            signUpButton.addTarget(self, action: #selector(handleEmailSignUp), for: .touchUpInside)
+            signUpButton.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(signUpButton)
+            NSLayoutConstraint.activate([signUpButton.widthAnchor.constraint(equalToConstant: 280)])
+
+            // Status label for errors/feedback
+            statusLabel.textColor = .systemRed
+            statusLabel.font = .systemFont(ofSize: 14)
+            statusLabel.textAlignment = .center
+            statusLabel.numberOfLines = 0
+            statusLabel.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(statusLabel)
+            NSLayoutConstraint.activate([statusLabel.widthAnchor.constraint(equalToConstant: 280)])
         } else {
             let signOutButton = UIButton(configuration: .filled())
             signOutButton.setTitle("Sign Out", for: .normal)
@@ -547,12 +685,6 @@ class AccountSettingsSheet: UIViewController {
             stack.addArrangedSubview(signOutButton)
             NSLayoutConstraint.activate([signOutButton.widthAnchor.constraint(equalToConstant: 200)])
         }
-
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-        ])
     }
 
     @objc private func dismissSheet() {
@@ -566,6 +698,58 @@ class AccountSettingsSheet: UIViewController {
         controller.delegate = self
         controller.presentationContextProvider = self
         controller.performRequests()
+    }
+
+    @objc private func handleSignInWithGoogle() {
+        authService.signInWithGoogle(presentingViewController: self) { [weak self] success, error in
+            DispatchQueue.main.async {
+                if success {
+                    self?.dismiss(animated: true)
+                } else {
+                    self?.statusLabel.text = error ?? "Google sign-in failed"
+                }
+            }
+        }
+    }
+
+    @objc private func handleEmailSignIn() {
+        guard let email = emailField.text, !email.isEmpty,
+              let password = passwordField.text, !password.isEmpty else {
+            statusLabel.text = "Please enter email and password"
+            return
+        }
+        statusLabel.text = nil
+        authService.signInWithEmail(email: email, password: password) { [weak self] success, error in
+            DispatchQueue.main.async {
+                if success {
+                    self?.dismiss(animated: true)
+                } else {
+                    self?.statusLabel.text = error ?? "Sign in failed"
+                }
+            }
+        }
+    }
+
+    @objc private func handleEmailSignUp() {
+        guard let email = emailField.text, !email.isEmpty,
+              let password = passwordField.text, !password.isEmpty else {
+            statusLabel.text = "Please enter email and password"
+            return
+        }
+        guard passwordField.text?.count ?? 0 >= 6 else {
+            statusLabel.text = "Password must be at least 6 characters"
+            return
+        }
+        statusLabel.text = nil
+        authService.signUpWithEmail(email: email, password: password) { [weak self] success, error in
+            DispatchQueue.main.async {
+                if success {
+                    self?.dismiss(animated: true)
+                } else {
+                    self?.statusLabel.text = error ?? "Sign up failed"
+                }
+            }
+        }
     }
 
     @objc private func handleSignOut() {

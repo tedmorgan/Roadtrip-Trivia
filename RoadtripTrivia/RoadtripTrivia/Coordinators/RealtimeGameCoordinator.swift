@@ -40,6 +40,7 @@ class RealtimeGameCoordinator: ObservableObject {
     private var isLightningRound = false
     private var lightningSecondsRemaining = 120
     private var lightningEndCutoffWork: DispatchWorkItem?
+    private var lightningAnnouncedButNotStarted = false
 
     // Per-round hint/challenge limits (Bug 20)
     private var roundHintsUsed = 0
@@ -435,12 +436,10 @@ class RealtimeGameCoordinator: ObservableObject {
             }
         }
 
-        // Track question text for history (Bug 7)
-        // Bug 29: Cap in-memory history to 20 to keep system prompt under token limits
         if let questionText = args.questionText, !questionText.isEmpty {
             questionHistory.append(questionText)
-            if questionHistory.count > 20 {
-                questionHistory = Array(questionHistory.suffix(20))
+            if questionHistory.count > 50 {
+                questionHistory = Array(questionHistory.suffix(50))
             }
             saveQuestionHistory()
         }
@@ -527,8 +526,14 @@ class RealtimeGameCoordinator: ObservableObject {
         }
 
         // Detect lightning round start/stop from the label (LTNG-08)
+        // Timer is deferred until instructions are delivered (state == "listening")
         let label = args.label?.lowercased() ?? ""
-        if label.contains("lightning") && !isLightningRound {
+        if label.contains("lightning") && !isLightningRound && !lightningAnnouncedButNotStarted {
+            lightningAnnouncedButNotStarted = true
+            gameViewModel.lightningSecondsRemaining = 120
+            print("[RealtimeGame] Lightning round announced — timer deferred until first question")
+        } else if lightningAnnouncedButNotStarted && args.state == "listening" {
+            lightningAnnouncedButNotStarted = false
             startLightningTimer()
         } else if isLightningRound && args.state == "waiting" && !label.contains("lightning") {
             stopLightningTimer()
@@ -716,6 +721,7 @@ class RealtimeGameCoordinator: ObservableObject {
         lightningEndCutoffWork?.cancel()
         lightningEndCutoffWork = nil
         isLightningRound = false
+        lightningAnnouncedButNotStarted = false
         stateManager.clearLightning()
         gameViewModel.lightningSecondsRemaining = nil
         print("[RealtimeGame] Lightning round ended")
@@ -737,10 +743,8 @@ class RealtimeGameCoordinator: ObservableObject {
 
     private func loadQuestionHistory() {
         questionHistory = UserDefaults.standard.stringArray(forKey: questionHistoryKey) ?? []
-        // Bug 29: Keep only last 20 questions in prompt to prevent token overflow.
-        // Full history stays on disk (up to 200) so questions aren't repeated across sessions.
-        if questionHistory.count > 20 {
-            questionHistory = Array(questionHistory.suffix(20))
+        if questionHistory.count > 50 {
+            questionHistory = Array(questionHistory.suffix(50))
         }
         print("[RealtimeGame] Loaded \(questionHistory.count) questions from history")
     }

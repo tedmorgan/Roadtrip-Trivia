@@ -145,8 +145,17 @@ enum Difficulty: String, CaseIterable {
     case hard = "Wicked Hard"
     case einstein = "Einstein"
 
+    var pointsPerCorrect: Int {
+        switch self {
+        case .simple: return 100
+        case .tricky: return 200
+        case .hard: return 300
+        case .einstein: return 400
+        }
+    }
+
     var usesMultipleChoice: Bool {
-        self == .simple
+        self == .simple || self == .tricky
     }
 
     var gradingStrictness: String {

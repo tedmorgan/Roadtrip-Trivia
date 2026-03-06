@@ -258,21 +258,31 @@ class RealtimeGameCoordinator: ObservableObject {
         case .responseFunctionCallArgumentsDone(let callId, let name, let arguments):
             handleFunctionCall(callId: callId, name: name, arguments: arguments)
 
+        case .responseDone:
+            // Flush any batched function call results so the LLM continues
+            flushPendingResults()
+
         case .inputAudioBufferSpeechStarted:
-            // User is speaking — update UI to listening
             gameViewModel.transition(to: .listening)
 
         case .responseAudioDelta:
-            // Model is speaking — update UI to speaking
             let phase = gameViewModel.currentPhase
             if phase == .listening || phase == .playing || phase == .waiting {
                 gameViewModel.transition(to: .speaking)
             }
 
         case .responseAudioDone:
-            // Model finished speaking — transition to listening for user response
             if gameViewModel.currentPhase == .speaking {
                 gameViewModel.transition(to: .listening)
+            }
+
+        case .responseAudioTranscriptDone(let text):
+            // Detect lightning round announcement from transcript
+            if !isLightningRound && !lightningAnnouncedButNotStarted
+                && text.lowercased().contains("lightning round") {
+                lightningAnnouncedButNotStarted = true
+                gameViewModel.lightningSecondsRemaining = 120
+                print("[RealtimeGame] Lightning round detected from transcript")
             }
 
         case .error(let message, let code):
@@ -280,7 +290,6 @@ class RealtimeGameCoordinator: ObservableObject {
             if message.contains("session_expired") || message.contains("invalid_api_key") {
                 handleNetworkError()
             } else if code == "reconnect_failed" {
-                // Bug 29/31: All reconnection attempts exhausted — save game and go idle
                 print("[RealtimeGame] Reconnection exhausted — ending session gracefully")
                 handleNetworkError()
             }
@@ -309,12 +318,6 @@ class RealtimeGameCoordinator: ObservableObject {
 
         case "get_location":
             handleGetLocation(callId: callId)
-
-        case "update_ui":
-            handleUpdateUI(callId: callId, data: data)
-
-        case "checkpoint_game":
-            handleCheckpoint(callId: callId, data: data)
 
         case "end_game":
             handleEndGame(callId: callId, data: data)
@@ -371,6 +374,17 @@ class RealtimeGameCoordinator: ObservableObject {
 
         print("[RealtimeGame] Config set: \(args.playerCount) players, \(args.difficulty), team: \(args.teamName ?? ""), ages: \(args.ageBands)")
 
+        // Send trimmed session config with only the chosen difficulty section
+        let trimmedConfig = SystemPromptBuilder.buildTrimmedSessionConfig(
+            locationLabel: locationService.currentLocationLabel,
+            difficulty: difficulty,
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory
+        )
+        Task {
+            try? await sessionManager.send(.sessionUpdate(trimmedConfig))
+            print("[RealtimeGame] Session updated with trimmed prompt for \(difficulty.rawValue)")
+        }
+
         submitResult(callId: callId, result: [
             "acknowledged": true,
             "difficulty": args.difficulty,
@@ -385,7 +399,18 @@ class RealtimeGameCoordinator: ObservableObject {
             return
         }
 
-        // Update tracking
+        // Lightning round detection from isLightning field
+        let reportedLightning = args.isLightning ?? false
+        if reportedLightning && !isLightningRound && !lightningAnnouncedButNotStarted {
+            lightningAnnouncedButNotStarted = false
+            startLightningTimer()
+        } else if reportedLightning && lightningAnnouncedButNotStarted {
+            lightningAnnouncedButNotStarted = false
+            startLightningTimer()
+        } else if !reportedLightning && isLightningRound {
+            stopLightningTimer()
+        }
+
         totalAnswered += 1
         roundAnswered += 1
         if args.isCorrect {
@@ -394,7 +419,6 @@ class RealtimeGameCoordinator: ObservableObject {
         }
         currentQuestionIndex = args.questionIndex
 
-        // Bug 26/34: Play correct/incorrect sound effect — but NOT for hints or challenges
         let isHintOrChallenge = (args.wasHint ?? false) || (args.wasChallenge ?? false)
         if !isHintOrChallenge {
             if args.isCorrect {
@@ -404,7 +428,6 @@ class RealtimeGameCoordinator: ObservableObject {
             }
         }
 
-        // Bug 21: Dedicated lightning counters — only increment during lightning
         if isLightningRound {
             lightningAnswered += 1
             if args.isCorrect {
@@ -412,14 +435,13 @@ class RealtimeGameCoordinator: ObservableObject {
             }
         }
 
-        // Bug 20/27/28: Track per-round hint/challenge usage with explicit denial
         var actualHint = args.wasHint ?? false
         var actualChallenge = args.wasChallenge ?? false
         var hintDenied = false
         var challengeDenied = false
         if actualHint {
             if roundHintsUsed >= maxHintsPerRound {
-                actualHint = false // exceeded limit, don't count
+                actualHint = false
                 hintDenied = true
                 print("[RealtimeGame] Hint DENIED — over limit (\(roundHintsUsed)/\(maxHintsPerRound))")
             } else {
@@ -444,7 +466,6 @@ class RealtimeGameCoordinator: ObservableObject {
             saveQuestionHistory()
         }
 
-        // Update view model
         gameViewModel.recordAnswerFromRealtime(
             answer: args.playerAnswer ?? "",
             isCorrect: args.isCorrect,
@@ -452,7 +473,9 @@ class RealtimeGameCoordinator: ObservableObject {
             wasChallenge: actualChallenge
         )
 
-        // Update CarPlay score display + iPhone display properties
+        // Transition to showingResult (previously done by update_ui)
+        gameViewModel.transition(to: .showingResult)
+
         if isLightningRound {
             stateManager.updateLightningTimer(
                 secondsRemaining: lightningSecondsRemaining,
@@ -466,12 +489,68 @@ class RealtimeGameCoordinator: ObservableObject {
                 totalInRound: 5
             )
         }
-        // Mirror display properties for iPhone UI
         gameViewModel.displayRoundCorrect = roundCorrect
         gameViewModel.displayTotalCorrect = totalCorrect
         gameViewModel.displayQuestionInRound = args.questionIndex + 1
 
-        // Bug 20/27/28: Return hint/challenge limits and denial info so LLM enforces limits
+        // Checkpoint logic (merged from checkpoint_game)
+        if let roundNumber = args.roundNumber {
+            let reportedCategory = args.category ?? currentCategory
+
+            let isNewRound = roundNumber != currentRoundNumber && currentRoundNumber > 0
+            if isNewRound {
+                gameViewModel.completeCurrentRound()
+                stateManager.showRoundSummary(
+                    roundScore: roundCorrect,
+                    roundTotal: roundAnswered,
+                    cumCorrect: totalCorrect,
+                    cumAnswered: totalAnswered,
+                    hints: gameViewModel.currentSession?.hintsUsed ?? 0,
+                    challenges: gameViewModel.currentSession?.challengesUsed ?? 0
+                )
+                roundCorrect = 0
+                roundAnswered = 0
+                roundHintsUsed = 0
+                roundChallengesUsed = 0
+            }
+
+            currentRoundNumber = roundNumber
+            currentCategory = reportedCategory
+
+            // Fallback lightning detection from round pattern
+            if !isLightningRound && currentRoundNumber > 4 && (currentRoundNumber - 1) % 5 == 0 {
+                print("[RealtimeGame] Fallback: detected lightning round from round number \(currentRoundNumber)")
+                startLightningTimer()
+            }
+
+            let roundType: RoundType = isLightningRound ? .lightning : .standard
+            gameViewModel.startNewRoundIfNeeded(roundNumber: roundNumber, category: currentCategory, type: roundType)
+
+            stateManager.updateRound(number: currentRoundNumber, category: currentCategory)
+            gameViewModel.displayRoundNumber = currentRoundNumber
+            gameViewModel.displayCategory = currentCategory
+
+            let checkpoint = SessionCheckpoint(
+                sessionID: gameViewModel.currentSession?.id ?? UUID(),
+                roundIndex: roundNumber - 1,
+                questionIndex: args.questionIndex,
+                totalScore: totalCorrect,
+                hintsUsed: gameViewModel.currentSession?.hintsUsed ?? 0,
+                challengesUsed: gameViewModel.currentSession?.challengesUsed ?? 0,
+                currentCategory: currentCategory,
+                locationLabel: locationService.currentLocationLabel,
+                lightningTimeRemaining: isLightningRound ? TimeInterval(lightningSecondsRemaining) : nil,
+                difficulty: gameViewModel.currentSession?.difficulty ?? .tricky,
+                playerCount: gameViewModel.currentSession?.playerCount ?? 1,
+                ageBands: gameViewModel.currentSession?.ageBands ?? [.adults],
+                teamName: gameViewModel.currentSession?.teamName,
+                savedAt: Date()
+            )
+            DispatchQueue.global(qos: .utility).async { [persistence] in
+                persistence.saveCheckpoint(checkpoint)
+            }
+        }
+
         var result: [String: Any] = [
             "acknowledged": true,
             "totalCorrect": totalCorrect,
@@ -480,23 +559,19 @@ class RealtimeGameCoordinator: ObservableObject {
             "hintsRemainingThisRound": max(0, maxHintsPerRound - roundHintsUsed),
             "challengesRemainingThisRound": max(0, maxChallengesPerRound - roundChallengesUsed)
         ]
-        // Bug 27: Explicitly tell LLM when a hint was denied
         if hintDenied {
             result["hintDenied"] = true
             result["hintDeniedMessage"] = "HINT DENIED: All \(maxHintsPerRound) hints used this round. Tell the player: Sorry, no more hints this round!"
         }
-        // Bug 28: Explicitly tell LLM when a challenge was denied
         if challengeDenied {
             result["challengeDenied"] = true
             result["challengeDeniedMessage"] = "CHALLENGE DENIED: The \(maxChallengesPerRound) challenge for this round has been used. Tell the player: No more challenges this round!"
         }
         submitResult(callId: callId, result: result)
 
-        // Bug 35: Force-interrupt the LLM if a hint was denied — cancel any in-progress
-        // response (which may already be speaking a hint) and make it announce the denial
         if hintDenied {
             Task {
-                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s for result to process
+                try? await Task.sleep(nanoseconds: 200_000_000)
                 try? await sessionManager.send(.responseCancel)
                 try? await sessionManager.send(.responseCreate(
                     instructions: "STOP. The hint was DENIED by the app — the team has already used all \(maxHintsPerRound) hints this round. Do NOT give any clue. Tell them: Sorry, you've used both hints this round! Then continue with the current question."
@@ -517,114 +592,6 @@ class RealtimeGameCoordinator: ObservableObject {
     private func handleGetLocation(callId: String) {
         let location = locationService.currentLocationLabel ?? "somewhere in the United States"
         submitResult(callId: callId, result: ["locationLabel": location])
-    }
-
-    private func handleUpdateUI(callId: String, data: Data) {
-        guard let args = try? JSONDecoder().decode(UpdateUIArgs.self, from: data) else {
-            submitResult(callId: callId, result: ["acknowledged": true])
-            return
-        }
-
-        // Detect lightning round start/stop from the label (LTNG-08)
-        // Timer is deferred until instructions are delivered (state == "listening")
-        let label = args.label?.lowercased() ?? ""
-        if label.contains("lightning") && !isLightningRound && !lightningAnnouncedButNotStarted {
-            lightningAnnouncedButNotStarted = true
-            gameViewModel.lightningSecondsRemaining = 120
-            print("[RealtimeGame] Lightning round announced — timer deferred until first question")
-        } else if lightningAnnouncedButNotStarted && args.state == "listening" {
-            lightningAnnouncedButNotStarted = false
-            startLightningTimer()
-        } else if isLightningRound && args.state == "waiting" && !label.contains("lightning") {
-            stopLightningTimer()
-        }
-
-        switch args.state {
-        case "listening":
-            gameViewModel.transition(to: .listening)
-        case "announcement":
-            gameViewModel.transition(to: .speaking)
-        case "result":
-            // Bug 26: Correct/incorrect sounds now play in handleReportScore instead
-            gameViewModel.transition(to: .showingResult)
-        case "waiting":
-            gameViewModel.transition(to: .waiting)
-        default:
-            break
-        }
-
-        submitResult(callId: callId, result: ["acknowledged": true])
-    }
-
-    private func handleCheckpoint(callId: String, data: Data) {
-        guard let args = try? JSONDecoder().decode(CheckpointGameArgs.self, from: data) else {
-            submitResult(callId: callId, result: ["acknowledged": true])
-            return
-        }
-
-        // Detect round change — show round summary (GAME-02, CP-SCORE-05)
-        let isNewRound = args.roundNumber != currentRoundNumber && currentRoundNumber > 0
-        if isNewRound {
-            // Mark previous round complete in view model
-            gameViewModel.completeCurrentRound()
-
-            stateManager.showRoundSummary(
-                roundScore: roundCorrect,
-                roundTotal: roundAnswered,
-                cumCorrect: totalCorrect,
-                cumAnswered: totalAnswered,
-                hints: gameViewModel.currentSession?.hintsUsed ?? 0,
-                challenges: gameViewModel.currentSession?.challengesUsed ?? 0
-            )
-            // Reset per-round counters
-            roundCorrect = 0
-            roundAnswered = 0
-            roundHintsUsed = 0
-            roundChallengesUsed = 0
-        }
-
-        currentRoundNumber = args.roundNumber
-        currentQuestionIndex = args.questionIndex
-        currentCategory = args.category ?? currentCategory
-
-        // Bug 5: Fallback lightning detection — if LLM didn't call update_ui with
-        // "Lightning" label, detect lightning from round pattern (every 5th round = lightning)
-        if !isLightningRound && currentRoundNumber > 4 && (currentRoundNumber - 1) % 5 == 0 {
-            print("[RealtimeGame] Fallback: detected lightning round from round number \(currentRoundNumber)")
-            startLightningTimer()
-        }
-
-        // Bug 16: Ensure the session has a round object for this round number
-        let roundType: RoundType = isLightningRound ? .lightning : .standard
-        gameViewModel.startNewRoundIfNeeded(roundNumber: args.roundNumber, category: currentCategory, type: roundType)
-
-        // Update round label on CarPlay display + iPhone display properties
-        stateManager.updateRound(number: currentRoundNumber, category: currentCategory)
-        gameViewModel.displayRoundNumber = currentRoundNumber
-        gameViewModel.displayCategory = currentCategory
-
-        // Bug 30: Save checkpoint off main thread to prevent blocking the UI/WebSocket loop
-        let checkpoint = SessionCheckpoint(
-            sessionID: gameViewModel.currentSession?.id ?? UUID(),
-            roundIndex: args.roundNumber - 1,
-            questionIndex: args.questionIndex,
-            totalScore: args.totalCorrect,
-            hintsUsed: gameViewModel.currentSession?.hintsUsed ?? 0,
-            challengesUsed: gameViewModel.currentSession?.challengesUsed ?? 0,
-            currentCategory: currentCategory,
-            locationLabel: locationService.currentLocationLabel,
-            lightningTimeRemaining: isLightningRound ? TimeInterval(lightningSecondsRemaining) : nil,
-            difficulty: gameViewModel.currentSession?.difficulty ?? .tricky,
-            playerCount: gameViewModel.currentSession?.playerCount ?? 1,
-            ageBands: gameViewModel.currentSession?.ageBands ?? [.adults],
-            teamName: gameViewModel.currentSession?.teamName,
-            savedAt: Date()
-        )
-        DispatchQueue.global(qos: .utility).async { [persistence] in
-            persistence.saveCheckpoint(checkpoint)
-        }
-
-        submitResult(callId: callId, result: ["saved": true])
     }
 
     private func handleEndGame(callId: String, data: Data) {
@@ -653,7 +620,7 @@ class RealtimeGameCoordinator: ObservableObject {
             self?.disconnect()
         }
 
-        submitResult(callId: callId, result: ["acknowledged": true])
+        submitResultImmediate(callId: callId, result: ["acknowledged": true])
     }
 
     // MARK: - Lightning Round Timer (LTNG-08, CP-SCORE-06)
@@ -765,12 +732,38 @@ class RealtimeGameCoordinator: ObservableObject {
 
     // MARK: - Submit Function Result
 
+    /// Queue a function result for batched submission. The result is sent to the
+    /// API immediately, but response.create is deferred until responseDone fires,
+    /// collapsing multiple function calls per turn into a single response cycle.
     private func submitResult(callId: String, result: [String: Any]) {
+        Task {
+            do {
+                try await sessionManager.queueFunctionResult(callId: callId, result: result)
+            } catch {
+                print("[RealtimeGame] Failed to submit function result: \(error)")
+            }
+        }
+    }
+
+    /// Submit a result AND immediately trigger a new LLM response.
+    /// Used only for flows that can't wait (end_game, hint/challenge denial).
+    private func submitResultImmediate(callId: String, result: [String: Any]) {
         Task {
             do {
                 try await sessionManager.submitFunctionResult(callId: callId, result: result)
             } catch {
                 print("[RealtimeGame] Failed to submit function result: \(error)")
+            }
+        }
+    }
+
+    /// Flush any pending batched results when the LLM finishes a response turn.
+    private func flushPendingResults() {
+        Task {
+            do {
+                try await sessionManager.flushPendingResults()
+            } catch {
+                print("[RealtimeGame] Failed to flush pending results: \(error)")
             }
         }
     }

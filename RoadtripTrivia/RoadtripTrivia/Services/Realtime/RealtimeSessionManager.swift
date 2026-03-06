@@ -109,7 +109,8 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         apiLogger.logConnection(event: "Disconnected")
     }
 
-    /// Submit a function call result back to the model, then trigger a response.
+    /// Submit a function call result AND immediately trigger a new response.
+    /// Use only for cases that need the LLM to respond right away (end_game, hint denial).
     func submitFunctionResult(callId: String, result: [String: Any]) async throws {
         let resultJSON = try JSONSerialization.data(withJSONObject: result)
         let resultString = String(data: resultJSON, encoding: .utf8) ?? "{}"
@@ -117,6 +118,25 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         try await send(.conversationItemCreate(callId: callId, output: resultString))
         try await send(.responseCreate(instructions: nil))
     }
+
+    /// Queue a function call result WITHOUT triggering a new response.
+    /// Multiple results can be queued; call flushPendingResults() to send one
+    /// response.create after all results from a single LLM turn are submitted.
+    func queueFunctionResult(callId: String, result: [String: Any]) async throws {
+        let resultJSON = try JSONSerialization.data(withJSONObject: result)
+        let resultString = String(data: resultJSON, encoding: .utf8) ?? "{}"
+        hasPendingResults = true
+        try await send(.conversationItemCreate(callId: callId, output: resultString))
+    }
+
+    /// Send a single response.create to resume the LLM after all queued results.
+    func flushPendingResults() async throws {
+        guard hasPendingResults else { return }
+        hasPendingResults = false
+        try await send(.responseCreate(instructions: nil))
+    }
+
+    private(set) var hasPendingResults = false
 
     // MARK: - Ephemeral Token
 

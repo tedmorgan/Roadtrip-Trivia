@@ -197,19 +197,9 @@ struct ReportScoreArgs: Codable {
     let isCorrect: Bool
     let wasChallenge: Bool?
     let wasHint: Bool?
-}
-
-struct UpdateUIArgs: Codable {
-    let state: String
-    let label: String?
-}
-
-struct CheckpointGameArgs: Codable {
-    let roundNumber: Int
-    let questionIndex: Int
+    let roundNumber: Int?
     let category: String?
-    let totalCorrect: Int
-    let totalAnswered: Int
+    let isLightning: Bool?
 }
 
 struct EndGameArgs: Codable {

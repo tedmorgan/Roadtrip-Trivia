@@ -12,6 +12,7 @@ class AuthService: NSObject, ObservableObject {
 
     @Published private(set) var isAuthenticated = false
     @Published private(set) var currentUserID: String?
+    @Published private(set) var currentEmail: String?
 
     /// Bearer token for Supabase Edge Function API calls
     private(set) var currentToken: String?
@@ -177,6 +178,54 @@ class AuthService: NSObject, ObservableObject {
         }.resume()
     }
 
+    // MARK: - Password Reset
+
+    func sendPasswordReset(email: String, completion: @escaping (Bool, String?) -> Void) {
+        let url = URL(string: "\(supabaseURL)/auth/v1/recover")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": email])
+
+        urlSession.dataTask(with: request) { _, response, error in
+            DispatchQueue.main.async {
+                let ok = (response as? HTTPURLResponse)?.statusCode == 200
+                completion(ok, ok ? nil : "Failed to send password reset email")
+            }
+        }.resume()
+    }
+
+    // MARK: - User Profile
+
+    func fetchUserProfile(completion: @escaping (String?) -> Void) {
+        guard let token = currentToken else {
+            completion(nil)
+            return
+        }
+        let url = URL(string: "\(supabaseURL)/auth/v1/user")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+
+        urlSession.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let data,
+                      let http = response as? HTTPURLResponse,
+                      http.statusCode == 200,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let email = json["email"] as? String else {
+                    completion(nil)
+                    return
+                }
+                self?.currentEmail = email
+                self?.saveToKeychain(key: "userEmail", value: email)
+                completion(email)
+            }
+        }.resume()
+    }
+
     // MARK: - Google Sign-In (AUTH-01, OAuth via Supabase)
 
     /// Google Sign-In using Supabase OAuth flow.
@@ -231,8 +280,12 @@ class AuthService: NSObject, ObservableObject {
 
         currentToken = accessToken
         currentUserID = decodeUserIdFromJWT(accessToken)
+        currentEmail = decodeEmailFromJWT(accessToken)
         if let userId = currentUserID {
             saveToKeychain(key: "userId", value: userId)
+        }
+        if let email = currentEmail {
+            saveToKeychain(key: "userEmail", value: email)
         }
         isAuthenticated = true
         print("[Auth] Google sign-in successful — user: \(currentUserID ?? "unknown")")
@@ -340,24 +393,32 @@ class AuthService: NSObject, ObservableObject {
             return decodeUserIdFromJWT(accessToken)
         }()
 
+        let userEmail: String? = {
+            if let user = json["user"] as? [String: Any] { return user["email"] as? String }
+            return decodeEmailFromJWT(accessToken)
+        }()
+
         // Persist tokens in Keychain (AUTH-02)
         saveToKeychain(key: "accessToken", value: accessToken)
         saveToKeychain(key: "refreshToken", value: refreshToken)
         if let userId { saveToKeychain(key: "userId", value: userId) }
+        if let userEmail { saveToKeychain(key: "userEmail", value: userEmail) }
 
         currentToken = accessToken
         currentUserID = userId
+        currentEmail = userEmail
         isAuthenticated = true
         print("[Auth] Authenticated — user: \(userId ?? "unknown")")
         completion(true)
     }
 
     private func clearLocalAuth() {
-        for key in ["accessToken", "refreshToken", "userId", "appleIDToken", "appleUserID"] {
+        for key in ["accessToken", "refreshToken", "userId", "userEmail", "appleIDToken", "appleUserID"] {
             deleteFromKeychain(key: key)
         }
         currentToken = nil
         currentUserID = nil
+        currentEmail = nil
         isAuthenticated = false
     }
 
@@ -373,6 +434,7 @@ class AuthService: NSObject, ObservableObject {
                 if state == .authorized {
                     self?.currentUserID = appleUserID
                     self?.currentToken = self?.loadFromKeychain(key: "appleIDToken")
+                    self?.currentEmail = self?.loadFromKeychain(key: "userEmail")
                     self?.isAuthenticated = true
                     completion(true)
                 } else {
@@ -382,14 +444,21 @@ class AuthService: NSObject, ObservableObject {
         }
     }
 
-    private func decodeUserIdFromJWT(_ token: String) -> String? {
+    private func decodeJWTPayload(_ token: String) -> [String: Any]? {
         let parts = token.split(separator: ".")
         guard parts.count >= 2 else { return nil }
         var b64 = String(parts[1])
         while b64.count % 4 != 0 { b64.append("=") }
-        guard let data = Data(base64Encoded: b64),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return json["sub"] as? String
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private func decodeUserIdFromJWT(_ token: String) -> String? {
+        decodeJWTPayload(token)?["sub"] as? String
+    }
+
+    private func decodeEmailFromJWT(_ token: String) -> String? {
+        decodeJWTPayload(token)?["email"] as? String
     }
 
     private func parseError(data: Data) -> String? {

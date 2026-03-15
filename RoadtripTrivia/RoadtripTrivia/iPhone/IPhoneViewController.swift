@@ -110,7 +110,7 @@ class IPhoneViewController: UIViewController {
         gradient.colors = [
             colorDeepPurple.cgColor,
             colorDarkVoid.cgColor,
-            UIColor(red: 0x15, green: 0x00, blue: 0x30, alpha: 1.0).cgColor
+            UIColor(red: 0x15 / 255.0, green: 0x00 / 255.0, blue: 0x30 / 255.0, alpha: 1.0).cgColor
         ]
         gradient.locations = [0.0, 0.5, 1.0]
         gradient.startPoint = CGPoint(x: 0.5, y: 0)
@@ -522,8 +522,10 @@ class IPhoneViewController: UIViewController {
         let nav = UINavigationController(rootViewController: sheet)
         nav.modalPresentationStyle = .formSheet
         if #available(iOS 16.0, *) {
-            if let sheet = nav.sheetPresentationController {
-                sheet.detents = [.medium(), .large()]
+            if let sheetController = nav.sheetPresentationController {
+                sheetController.detents = [.medium(), .large()]
+                sheetController.prefersGrabberVisible = true
+                sheetController.selectedDetentIdentifier = .large
             }
         }
         present(nav, animated: true)
@@ -533,12 +535,32 @@ class IPhoneViewController: UIViewController {
 // MARK: - Account Settings Sheet
 
 class AccountSettingsSheet: UIViewController {
-    let authService: AuthService
-    private var isAuthenticated = false
 
-    private let emailField = UITextField()
-    private let passwordField = UITextField()
+    private let authService: AuthService
+
+    // MARK: - Color Palette (matches app theme)
+    private let colorDeepPurple = UIColor(red: 0x1A / 255.0, green: 0x0A / 255.0, blue: 0x2E / 255.0, alpha: 1.0)
+    private let colorDarkVoid = UIColor(red: 0x0D / 255.0, green: 0x02 / 255.0, blue: 0x21 / 255.0, alpha: 1.0)
+    private let colorNeonPink = UIColor(red: 0xFF / 255.0, green: 0x2D / 255.0, blue: 0x95 / 255.0, alpha: 1.0)
+    private let colorNeonYellow = UIColor(red: 0xFF / 255.0, green: 0xE0 / 255.0, blue: 0x00 / 255.0, alpha: 1.0)
+    private let colorNeonCyan = UIColor(red: 0x00 / 255.0, green: 0xFF / 255.0, blue: 0xFF / 255.0, alpha: 1.0)
+    private let colorNeonGreen = UIColor(red: 0x00 / 255.0, green: 0xFF / 255.0, blue: 0x65 / 255.0, alpha: 1.0)
+    private let colorNeonOrange = UIColor(red: 0xFF / 255.0, green: 0x6B / 255.0, blue: 0x00 / 255.0, alpha: 1.0)
+    private let colorGridPurple = UIColor(red: 0x6B / 255.0, green: 0x00 / 255.0, blue: 0xCC / 255.0, alpha: 1.0)
+
+    // MARK: - UI State
+    private enum AuthMode { case signIn, createAccount }
+    private var currentMode: AuthMode = .signIn
+
+    // Shared UI
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
     private let statusLabel = UILabel()
+    private let activityIndicator = UIActivityIndicatorView(style: .medium)
+
+    // Tag constants for themed text fields
+    private static let emailFieldTag = 100
+    private static let passwordFieldTag = 101
 
     init(authService: AuthService) {
         self.authService = authService
@@ -549,146 +571,530 @@ class AccountSettingsSheet: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    // MARK: - Lifecycle
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
 
-        navigationItem.title = "Settings"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissSheet))
+        setupGradientBackground()
 
-        isAuthenticated = authService.isAuthenticated
+        navigationItem.title = "Account"
+        navigationController?.navigationBar.barStyle = .black
+        navigationController?.navigationBar.barTintColor = colorDarkVoid
+        navigationController?.navigationBar.titleTextAttributes = [
+            .foregroundColor: colorNeonPink,
+            .font: roundedFont(size: 18, weight: .bold)
+        ]
+        let doneButton = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissSheet))
+        doneButton.tintColor = colorNeonCyan
+        navigationItem.rightBarButtonItem = doneButton
 
-        let scrollView = UIScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.alwaysBounceVertical = true
+        scrollView.keyboardDismissMode = .interactive
         view.addSubview(scrollView)
 
-        let stack = UIStackView()
-        stack.axis = .vertical
-        stack.spacing = 16
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stack)
+        // Tap to dismiss keyboard
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tapGesture.cancelsTouchesInView = false
+        scrollView.addGestureRecognizer(tapGesture)
+
+        contentStack.axis = .vertical
+        contentStack.spacing = 16
+        contentStack.alignment = .fill
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            stack.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 20),
-            stack.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: scrollView.bottomAnchor, constant: -20),
+
+            contentStack.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 20),
+            contentStack.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 20),
+            contentStack.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -20),
+            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: scrollView.bottomAnchor, constant: -20),
+            contentStack.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -40),
         ])
 
-        if !isAuthenticated {
-            // Apple Sign In
-            let appleButton = ASAuthorizationAppleIDButton(type: .signIn, style: .black)
-            appleButton.addTarget(self, action: #selector(handleSignInWithApple), for: .touchUpInside)
-            appleButton.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(appleButton)
-            NSLayoutConstraint.activate([
-                appleButton.widthAnchor.constraint(equalToConstant: 280),
-                appleButton.heightAnchor.constraint(equalToConstant: 44),
-            ])
-
-            // Google Sign In
-            let googleButton = UIButton(configuration: .filled())
-            googleButton.setTitle("Sign in with Google", for: .normal)
-            googleButton.setImage(UIImage(systemName: "g.circle.fill"), for: .normal)
-            googleButton.tintColor = .white
-            googleButton.configuration?.baseBackgroundColor = UIColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
-            googleButton.addTarget(self, action: #selector(handleSignInWithGoogle), for: .touchUpInside)
-            googleButton.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(googleButton)
-            NSLayoutConstraint.activate([
-                googleButton.widthAnchor.constraint(equalToConstant: 280),
-                googleButton.heightAnchor.constraint(equalToConstant: 44),
-            ])
-
-            // Divider
-            let dividerStack = UIStackView()
-            dividerStack.axis = .horizontal
-            dividerStack.spacing = 12
-            dividerStack.alignment = .center
-            dividerStack.translatesAutoresizingMaskIntoConstraints = false
-
-            let leftLine = UIView()
-            leftLine.backgroundColor = .separator
-            leftLine.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([leftLine.heightAnchor.constraint(equalToConstant: 1)])
-
-            let orLabel = UILabel()
-            orLabel.text = "or"
-            orLabel.textColor = .secondaryLabel
-            orLabel.font = .systemFont(ofSize: 14)
-
-            let rightLine = UIView()
-            rightLine.backgroundColor = .separator
-            rightLine.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([rightLine.heightAnchor.constraint(equalToConstant: 1)])
-
-            dividerStack.addArrangedSubview(leftLine)
-            dividerStack.addArrangedSubview(orLabel)
-            dividerStack.addArrangedSubview(rightLine)
-            NSLayoutConstraint.activate([
-                leftLine.widthAnchor.constraint(equalToConstant: 100),
-                rightLine.widthAnchor.constraint(equalToConstant: 100),
-            ])
-            stack.addArrangedSubview(dividerStack)
-
-            // Email field
-            emailField.placeholder = "Email"
-            emailField.borderStyle = .roundedRect
-            emailField.keyboardType = .emailAddress
-            emailField.autocapitalizationType = .none
-            emailField.autocorrectionType = .no
-            emailField.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(emailField)
-            NSLayoutConstraint.activate([emailField.widthAnchor.constraint(equalToConstant: 280)])
-
-            // Password field
-            passwordField.placeholder = "Password"
-            passwordField.borderStyle = .roundedRect
-            passwordField.isSecureTextEntry = true
-            passwordField.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(passwordField)
-            NSLayoutConstraint.activate([passwordField.widthAnchor.constraint(equalToConstant: 280)])
-
-            // Sign In button
-            let signInButton = UIButton(configuration: .filled())
-            signInButton.setTitle("Sign In", for: .normal)
-            signInButton.addTarget(self, action: #selector(handleEmailSignIn), for: .touchUpInside)
-            signInButton.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(signInButton)
-            NSLayoutConstraint.activate([signInButton.widthAnchor.constraint(equalToConstant: 280)])
-
-            // Sign Up button
-            let signUpButton = UIButton(configuration: .tinted())
-            signUpButton.setTitle("Create Account", for: .normal)
-            signUpButton.addTarget(self, action: #selector(handleEmailSignUp), for: .touchUpInside)
-            signUpButton.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(signUpButton)
-            NSLayoutConstraint.activate([signUpButton.widthAnchor.constraint(equalToConstant: 280)])
-
-            // Status label for errors/feedback
-            statusLabel.textColor = .systemRed
-            statusLabel.font = .systemFont(ofSize: 14)
-            statusLabel.textAlignment = .center
-            statusLabel.numberOfLines = 0
-            statusLabel.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(statusLabel)
-            NSLayoutConstraint.activate([statusLabel.widthAnchor.constraint(equalToConstant: 280)])
+        if authService.isAuthenticated {
+            buildAuthenticatedUI()
         } else {
-            let signOutButton = UIButton(configuration: .filled())
-            signOutButton.setTitle("Sign Out", for: .normal)
-            signOutButton.addTarget(self, action: #selector(handleSignOut), for: .touchUpInside)
-            stack.addArrangedSubview(signOutButton)
-            NSLayoutConstraint.activate([signOutButton.widthAnchor.constraint(equalToConstant: 200)])
+            buildUnauthenticatedUI()
         }
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
+                                               name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)),
+                                               name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if let gradient = view.layer.sublayers?.first as? CAGradientLayer {
+            gradient.frame = view.bounds
+        }
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+        let keyboardHeight = keyboardFrame.height - view.safeAreaInsets.bottom
+        UIView.animate(withDuration: duration) {
+            self.scrollView.contentInset.bottom = keyboardHeight + 20
+            self.scrollView.verticalScrollIndicatorInsets.bottom = keyboardHeight
+        }
+        // Scroll to active field
+        if let activeField = view.findFirstResponder() {
+            let fieldFrame = activeField.convert(activeField.bounds, to: scrollView)
+            scrollView.scrollRectToVisible(fieldFrame.insetBy(dx: 0, dy: -60), animated: true)
+        }
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+        UIView.animate(withDuration: duration) {
+            self.scrollView.contentInset.bottom = 0
+            self.scrollView.verticalScrollIndicatorInsets.bottom = 0
+        }
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
+    }
+
+    // MARK: - Background
+
+    private func setupGradientBackground() {
+        let gradient = CAGradientLayer()
+        gradient.colors = [colorDeepPurple.cgColor, colorDarkVoid.cgColor]
+        gradient.locations = [0.0, 1.0]
+        gradient.frame = view.bounds
+        view.layer.insertSublayer(gradient, at: 0)
+    }
+
+    // MARK: - Theme Helpers
+
+    private func roundedFont(size: CGFloat, weight: UIFont.Weight) -> UIFont {
+        let systemFont = UIFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = systemFont.fontDescriptor.withDesign(.rounded) {
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        return systemFont
+    }
+
+    private func applyNeonGlow(to view: UIView, color: UIColor, radius: CGFloat = 12, opacity: Float = 0.9) {
+        view.layer.shadowColor = color.cgColor
+        view.layer.shadowRadius = radius
+        view.layer.shadowOpacity = opacity
+        view.layer.shadowOffset = .zero
+    }
+
+    private func makeNeonButton(title: String, color: UIColor, action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.titleLabel?.font = roundedFont(size: 17, weight: .bold)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = color.withAlphaComponent(0.2)
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = 1.5
+        button.layer.borderColor = color.cgColor
+        applyNeonGlow(to: button, color: color, radius: 8, opacity: 0.5)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        button.addTarget(self, action: action, for: .touchUpInside)
+        return button
+    }
+
+    private func makeThemedTextField(placeholder: String, isSecure: Bool = false, tag: Int) -> UITextField {
+        let field = UITextField()
+        field.attributedPlaceholder = NSAttributedString(
+            string: placeholder,
+            attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.4)]
+        )
+        field.textColor = .white
+        field.font = roundedFont(size: 16, weight: .medium)
+        field.backgroundColor = colorDarkVoid.withAlphaComponent(0.8)
+        field.layer.cornerRadius = 10
+        field.layer.borderWidth = 1
+        field.layer.borderColor = colorGridPurple.cgColor
+        field.isSecureTextEntry = isSecure
+        field.autocapitalizationType = .none
+        field.autocorrectionType = .no
+        field.keyboardAppearance = .dark
+        field.returnKeyType = isSecure ? .go : .next
+        field.delegate = self
+        field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 14, height: 1))
+        field.leftViewMode = .always
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        field.tag = tag
+        return field
+    }
+
+    private func makeSectionHeader(title: String) -> UILabel {
+        let label = UILabel()
+        label.text = title
+        label.font = roundedFont(size: 13, weight: .bold)
+        label.textColor = colorNeonCyan.withAlphaComponent(0.7)
+        return label
+    }
+
+    private func makeSectionCard() -> UIView {
+        let card = UIView()
+        card.backgroundColor = colorDeepPurple.withAlphaComponent(0.6)
+        card.layer.cornerRadius = 14
+        card.layer.borderWidth = 1
+        card.layer.borderColor = colorGridPurple.withAlphaComponent(0.4).cgColor
+        card.translatesAutoresizingMaskIntoConstraints = false
+        return card
+    }
+
+    private func makeOrDivider() -> UIView {
+        let container = UIStackView()
+        container.axis = .horizontal
+        container.spacing = 12
+        container.alignment = .center
+
+        let leftLine = UIView()
+        leftLine.backgroundColor = colorGridPurple.withAlphaComponent(0.5)
+        leftLine.translatesAutoresizingMaskIntoConstraints = false
+        leftLine.heightAnchor.constraint(equalToConstant: 1).isActive = true
+
+        let orLabel = UILabel()
+        orLabel.text = "or"
+        orLabel.textColor = colorGridPurple
+        orLabel.font = roundedFont(size: 14, weight: .medium)
+
+        let rightLine = UIView()
+        rightLine.backgroundColor = colorGridPurple.withAlphaComponent(0.5)
+        rightLine.translatesAutoresizingMaskIntoConstraints = false
+        rightLine.heightAnchor.constraint(equalToConstant: 1).isActive = true
+
+        container.addArrangedSubview(leftLine)
+        container.addArrangedSubview(orLabel)
+        container.addArrangedSubview(rightLine)
+        leftLine.widthAnchor.constraint(equalTo: rightLine.widthAnchor).isActive = true
+
+        return container
+    }
+
+    private func makeActionRow(icon: String, title: String, color: UIColor, action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        button.addTarget(self, action: action, for: .touchUpInside)
+
+        let iconView = UIImageView(image: UIImage(systemName: icon))
+        iconView.tintColor = color
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(iconView)
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 22),
+            iconView.heightAnchor.constraint(equalToConstant: 22),
+        ])
+
+        let label = UILabel()
+        label.text = title
+        label.font = roundedFont(size: 16, weight: .medium)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(label)
+
+        let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        chevron.tintColor = color.withAlphaComponent(0.5)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(chevron)
+        chevron.widthAnchor.constraint(equalToConstant: 12).isActive = true
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 16),
+            iconView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
+            label.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            chevron.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -16),
+            chevron.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+        ])
+
+        return button
+    }
+
+    private func makeRowSeparator() -> UIView {
+        let sep = UIView()
+        sep.backgroundColor = colorGridPurple.withAlphaComponent(0.3)
+        sep.translatesAutoresizingMaskIntoConstraints = false
+        sep.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+        return sep
+    }
+
+    // MARK: - Unauthenticated UI
+
+    private func buildUnauthenticatedUI() {
+        contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        // Segmented control
+        let segmentedControl = UISegmentedControl(items: ["Sign In", "Create Account"])
+        segmentedControl.selectedSegmentIndex = currentMode == .signIn ? 0 : 1
+        segmentedControl.selectedSegmentTintColor = colorNeonPink.withAlphaComponent(0.3)
+        segmentedControl.setTitleTextAttributes([
+            .foregroundColor: UIColor.white.withAlphaComponent(0.6),
+            .font: roundedFont(size: 14, weight: .semibold)
+        ], for: .normal)
+        segmentedControl.setTitleTextAttributes([
+            .foregroundColor: colorNeonPink,
+            .font: roundedFont(size: 14, weight: .bold)
+        ], for: .selected)
+        segmentedControl.backgroundColor = colorDarkVoid.withAlphaComponent(0.6)
+        segmentedControl.addTarget(self, action: #selector(segmentChanged(_:)), for: .valueChanged)
+        contentStack.addArrangedSubview(segmentedControl)
+
+        // Social sign-in card
+        let socialCard = makeSectionCard()
+        let socialStack = UIStackView()
+        socialStack.axis = .vertical
+        socialStack.spacing = 12
+        socialStack.alignment = .fill
+        socialStack.translatesAutoresizingMaskIntoConstraints = false
+        socialCard.addSubview(socialStack)
+        NSLayoutConstraint.activate([
+            socialStack.topAnchor.constraint(equalTo: socialCard.topAnchor, constant: 16),
+            socialStack.leadingAnchor.constraint(equalTo: socialCard.leadingAnchor, constant: 16),
+            socialStack.trailingAnchor.constraint(equalTo: socialCard.trailingAnchor, constant: -16),
+            socialStack.bottomAnchor.constraint(equalTo: socialCard.bottomAnchor, constant: -16),
+        ])
+
+        let appleButton = ASAuthorizationAppleIDButton(type: .signIn, style: .white)
+        appleButton.cornerRadius = 12
+        appleButton.addTarget(self, action: #selector(handleSignInWithApple), for: .touchUpInside)
+        appleButton.translatesAutoresizingMaskIntoConstraints = false
+        appleButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        socialStack.addArrangedSubview(appleButton)
+
+        let googleButton = makeNeonButton(
+            title: "  Sign in with Google",
+            color: UIColor(red: 0.3, green: 0.5, blue: 1.0, alpha: 1.0),
+            action: #selector(handleSignInWithGoogle)
+        )
+        googleButton.setImage(UIImage(systemName: "g.circle.fill"), for: .normal)
+        googleButton.tintColor = .white
+        socialStack.addArrangedSubview(googleButton)
+
+        contentStack.addArrangedSubview(socialCard)
+
+        // "or" divider
+        contentStack.addArrangedSubview(makeOrDivider())
+
+        // Email/password card
+        let emailCard = makeSectionCard()
+        let emailStack = UIStackView()
+        emailStack.axis = .vertical
+        emailStack.spacing = 12
+        emailStack.alignment = .fill
+        emailStack.translatesAutoresizingMaskIntoConstraints = false
+        emailCard.addSubview(emailStack)
+        NSLayoutConstraint.activate([
+            emailStack.topAnchor.constraint(equalTo: emailCard.topAnchor, constant: 16),
+            emailStack.leadingAnchor.constraint(equalTo: emailCard.leadingAnchor, constant: 16),
+            emailStack.trailingAnchor.constraint(equalTo: emailCard.trailingAnchor, constant: -16),
+            emailStack.bottomAnchor.constraint(equalTo: emailCard.bottomAnchor, constant: -16),
+        ])
+
+        let themedEmail = makeThemedTextField(placeholder: "Email", tag: Self.emailFieldTag)
+        themedEmail.keyboardType = .emailAddress
+        emailStack.addArrangedSubview(themedEmail)
+
+        let themedPassword = makeThemedTextField(placeholder: "Password", isSecure: true, tag: Self.passwordFieldTag)
+        emailStack.addArrangedSubview(themedPassword)
+
+        // "Forgot Password?" link — only in sign-in mode
+        if currentMode == .signIn {
+            let forgotButton = UIButton(type: .system)
+            forgotButton.setTitle("Forgot Password?", for: .normal)
+            forgotButton.titleLabel?.font = roundedFont(size: 14, weight: .medium)
+            forgotButton.setTitleColor(colorNeonCyan, for: .normal)
+            forgotButton.contentHorizontalAlignment = .trailing
+            forgotButton.addTarget(self, action: #selector(handleForgotPassword), for: .touchUpInside)
+            emailStack.addArrangedSubview(forgotButton)
+        }
+
+        let actionTitle = currentMode == .signIn ? "Sign In" : "Create Account"
+        let actionSelector = currentMode == .signIn ? #selector(handleEmailSignIn) : #selector(handleEmailSignUp)
+        let actionButton = makeNeonButton(title: actionTitle, color: colorNeonPink, action: actionSelector)
+        emailStack.addArrangedSubview(actionButton)
+
+        contentStack.addArrangedSubview(emailCard)
+
+        // Status label
+        statusLabel.textColor = colorNeonOrange
+        statusLabel.font = roundedFont(size: 14, weight: .medium)
+        statusLabel.textAlignment = .center
+        statusLabel.numberOfLines = 0
+        statusLabel.text = nil
+        contentStack.addArrangedSubview(statusLabel)
+
+        // Activity indicator
+        activityIndicator.color = colorNeonCyan
+        activityIndicator.hidesWhenStopped = true
+        contentStack.addArrangedSubview(activityIndicator)
+    }
+
+    // MARK: - Authenticated UI
+
+    private func buildAuthenticatedUI() {
+        contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        // Account info card
+        let infoCard = makeSectionCard()
+        let infoStack = UIStackView()
+        infoStack.axis = .vertical
+        infoStack.spacing = 8
+        infoStack.alignment = .center
+        infoStack.translatesAutoresizingMaskIntoConstraints = false
+        infoCard.addSubview(infoStack)
+        NSLayoutConstraint.activate([
+            infoStack.topAnchor.constraint(equalTo: infoCard.topAnchor, constant: 20),
+            infoStack.leadingAnchor.constraint(equalTo: infoCard.leadingAnchor, constant: 16),
+            infoStack.trailingAnchor.constraint(equalTo: infoCard.trailingAnchor, constant: -16),
+            infoStack.bottomAnchor.constraint(equalTo: infoCard.bottomAnchor, constant: -20),
+        ])
+
+        // Avatar circle
+        let avatarView = UIView()
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            avatarView.widthAnchor.constraint(equalToConstant: 64),
+            avatarView.heightAnchor.constraint(equalToConstant: 64),
+        ])
+        avatarView.layer.cornerRadius = 32
+        avatarView.backgroundColor = colorGridPurple.withAlphaComponent(0.4)
+        avatarView.layer.borderWidth = 2
+        avatarView.layer.borderColor = colorNeonCyan.cgColor
+        applyNeonGlow(to: avatarView, color: colorNeonCyan, radius: 10, opacity: 0.4)
+
+        let avatarIcon = UIImageView(image: UIImage(systemName: "person.fill"))
+        avatarIcon.tintColor = colorNeonCyan
+        avatarIcon.translatesAutoresizingMaskIntoConstraints = false
+        avatarView.addSubview(avatarIcon)
+        NSLayoutConstraint.activate([
+            avatarIcon.centerXAnchor.constraint(equalTo: avatarView.centerXAnchor),
+            avatarIcon.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor),
+            avatarIcon.widthAnchor.constraint(equalToConstant: 28),
+            avatarIcon.heightAnchor.constraint(equalToConstant: 28),
+        ])
+        infoStack.addArrangedSubview(avatarView)
+
+        // Email label
+        let emailLabel = UILabel()
+        emailLabel.text = authService.currentEmail ?? "Loading..."
+        emailLabel.font = roundedFont(size: 17, weight: .semibold)
+        emailLabel.textColor = .white
+        emailLabel.textAlignment = .center
+        infoStack.addArrangedSubview(emailLabel)
+
+        // Fetch email if not cached
+        if authService.currentEmail == nil {
+            authService.fetchUserProfile { [weak emailLabel] email in
+                emailLabel?.text = email ?? "Unknown"
+            }
+        }
+
+        // User ID (truncated)
+        if let userId = authService.currentUserID {
+            let idLabel = UILabel()
+            let truncated = String(userId.prefix(8)) + "..."
+            idLabel.text = "ID: \(truncated)"
+            idLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            idLabel.textColor = colorGridPurple
+            idLabel.textAlignment = .center
+            infoStack.addArrangedSubview(idLabel)
+        }
+
+        contentStack.addArrangedSubview(infoCard)
+
+        // Account actions section
+        contentStack.addArrangedSubview(makeSectionHeader(title: "ACCOUNT"))
+
+        let actionsCard = makeSectionCard()
+        let actionsStack = UIStackView()
+        actionsStack.axis = .vertical
+        actionsStack.spacing = 0
+        actionsStack.alignment = .fill
+        actionsStack.translatesAutoresizingMaskIntoConstraints = false
+        actionsCard.addSubview(actionsStack)
+        NSLayoutConstraint.activate([
+            actionsStack.topAnchor.constraint(equalTo: actionsCard.topAnchor),
+            actionsStack.leadingAnchor.constraint(equalTo: actionsCard.leadingAnchor),
+            actionsStack.trailingAnchor.constraint(equalTo: actionsCard.trailingAnchor),
+            actionsStack.bottomAnchor.constraint(equalTo: actionsCard.bottomAnchor),
+        ])
+
+        actionsStack.addArrangedSubview(makeActionRow(
+            icon: "key.fill", title: "Change Password", color: colorNeonCyan,
+            action: #selector(handleChangePassword)
+        ))
+        actionsStack.addArrangedSubview(makeRowSeparator())
+        actionsStack.addArrangedSubview(makeActionRow(
+            icon: "rectangle.portrait.and.arrow.right", title: "Sign Out", color: colorNeonYellow,
+            action: #selector(handleSignOut)
+        ))
+
+        contentStack.addArrangedSubview(actionsCard)
+
+        // Danger zone section
+        contentStack.addArrangedSubview(makeSectionHeader(title: "DANGER ZONE"))
+
+        let dangerCard = makeSectionCard()
+        dangerCard.layer.borderColor = colorNeonOrange.withAlphaComponent(0.3).cgColor
+        let dangerStack = UIStackView()
+        dangerStack.axis = .vertical
+        dangerStack.spacing = 0
+        dangerStack.alignment = .fill
+        dangerStack.translatesAutoresizingMaskIntoConstraints = false
+        dangerCard.addSubview(dangerStack)
+        NSLayoutConstraint.activate([
+            dangerStack.topAnchor.constraint(equalTo: dangerCard.topAnchor),
+            dangerStack.leadingAnchor.constraint(equalTo: dangerCard.leadingAnchor),
+            dangerStack.trailingAnchor.constraint(equalTo: dangerCard.trailingAnchor),
+            dangerStack.bottomAnchor.constraint(equalTo: dangerCard.bottomAnchor),
+        ])
+
+        dangerStack.addArrangedSubview(makeActionRow(
+            icon: "trash.fill", title: "Delete Account", color: colorNeonOrange,
+            action: #selector(handleDeleteAccount)
+        ))
+
+        contentStack.addArrangedSubview(dangerCard)
+
+        // Version label
+        let versionLabel = UILabel()
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        versionLabel.text = "Roadtrip Trivia v\(version) (\(build))"
+        versionLabel.font = roundedFont(size: 12, weight: .regular)
+        versionLabel.textColor = colorGridPurple.withAlphaComponent(0.5)
+        versionLabel.textAlignment = .center
+        contentStack.addArrangedSubview(versionLabel)
+    }
+
+    // MARK: - Actions
+
     @objc private func dismissSheet() {
         dismiss(animated: true)
+    }
+
+    @objc private func segmentChanged(_ sender: UISegmentedControl) {
+        currentMode = sender.selectedSegmentIndex == 0 ? .signIn : .createAccount
+        buildUnauthenticatedUI()
     }
 
     @objc private func handleSignInWithApple() {
@@ -713,50 +1119,182 @@ class AccountSettingsSheet: UIViewController {
     }
 
     @objc private func handleEmailSignIn() {
-        guard let email = emailField.text, !email.isEmpty,
-              let password = passwordField.text, !password.isEmpty else {
+        guard let email = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text, !email.isEmpty,
+              let password = (view.viewWithTag(Self.passwordFieldTag) as? UITextField)?.text, !password.isEmpty else {
             statusLabel.text = "Please enter email and password"
             return
         }
         statusLabel.text = nil
+        activityIndicator.startAnimating()
         authService.signInWithEmail(email: email, password: password) { [weak self] success, error in
-            DispatchQueue.main.async {
-                if success {
-                    self?.dismiss(animated: true)
-                } else {
-                    self?.statusLabel.text = error ?? "Sign in failed"
-                }
+            self?.activityIndicator.stopAnimating()
+            if success {
+                self?.dismiss(animated: true)
+            } else {
+                self?.statusLabel.text = error ?? "Sign in failed"
             }
         }
     }
 
     @objc private func handleEmailSignUp() {
-        guard let email = emailField.text, !email.isEmpty,
-              let password = passwordField.text, !password.isEmpty else {
+        guard let email = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text, !email.isEmpty,
+              let password = (view.viewWithTag(Self.passwordFieldTag) as? UITextField)?.text, !password.isEmpty else {
             statusLabel.text = "Please enter email and password"
             return
         }
-        guard passwordField.text?.count ?? 0 >= 6 else {
+        guard password.count >= 6 else {
             statusLabel.text = "Password must be at least 6 characters"
             return
         }
         statusLabel.text = nil
+        activityIndicator.startAnimating()
         authService.signUpWithEmail(email: email, password: password) { [weak self] success, error in
-            DispatchQueue.main.async {
-                if success {
-                    self?.dismiss(animated: true)
-                } else {
-                    self?.statusLabel.text = error ?? "Sign up failed"
-                }
+            self?.activityIndicator.stopAnimating()
+            if success {
+                self?.dismiss(animated: true)
+            } else {
+                self?.statusLabel.text = error ?? "Sign up failed"
             }
         }
     }
 
+    @objc private func handleForgotPassword() {
+        let emailText = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+
+        if emailText.isEmpty {
+            let alert = UIAlertController(
+                title: "Reset Password",
+                message: "Enter your email address to receive a password reset link.",
+                preferredStyle: .alert
+            )
+            alert.addTextField { field in
+                field.placeholder = "Email address"
+                field.keyboardType = .emailAddress
+                field.autocapitalizationType = .none
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Send Reset Link", style: .default) { [weak self] _ in
+                guard let email = alert.textFields?.first?.text, !email.isEmpty else { return }
+                self?.performPasswordReset(email: email)
+            })
+            present(alert, animated: true)
+        } else {
+            performPasswordReset(email: emailText)
+        }
+    }
+
+    private func performPasswordReset(email: String) {
+        activityIndicator.startAnimating()
+        statusLabel.text = nil
+
+        authService.sendPasswordReset(email: email) { [weak self] success, error in
+            self?.activityIndicator.stopAnimating()
+            if success {
+                self?.statusLabel.textColor = self?.colorNeonGreen
+                self?.statusLabel.text = "Password reset link sent! Check your email."
+            } else {
+                self?.statusLabel.textColor = self?.colorNeonOrange
+                self?.statusLabel.text = error ?? "Failed to send reset link"
+            }
+        }
+    }
+
+    @objc private func handleChangePassword() {
+        guard let email = authService.currentEmail else {
+            let alert = UIAlertController(
+                title: "Change Password",
+                message: "Unable to determine your email. Please sign out and use \"Forgot Password?\" on the sign-in screen.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Change Password",
+            message: "We'll send a password reset link to \(email).",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Send Link", style: .default) { [weak self] _ in
+            self?.authService.sendPasswordReset(email: email) { success, error in
+                let resultAlert = UIAlertController(
+                    title: success ? "Link Sent" : "Error",
+                    message: success ? "Check your email for the password reset link." : (error ?? "Failed to send reset link."),
+                    preferredStyle: .alert
+                )
+                resultAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                self?.present(resultAlert, animated: true)
+            }
+        })
+        present(alert, animated: true)
+    }
+
     @objc private func handleSignOut() {
-        authService.signOut()
-        dismiss(animated: true)
+        let alert = UIAlertController(
+            title: "Sign Out",
+            message: "Are you sure you want to sign out?",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Sign Out", style: .destructive) { [weak self] _ in
+            self?.authService.signOut()
+            self?.dismiss(animated: true)
+        })
+        present(alert, animated: true)
+    }
+
+    @objc private func handleDeleteAccount() {
+        let alert = UIAlertController(
+            title: "Delete Account",
+            message: "This will permanently delete your account and all associated data. This action cannot be undone.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete My Account", style: .destructive) { [weak self] _ in
+            let confirm = UIAlertController(
+                title: "Are you absolutely sure?",
+                message: "Type DELETE to confirm account deletion.",
+                preferredStyle: .alert
+            )
+            confirm.addTextField { field in
+                field.placeholder = "Type DELETE"
+                field.autocapitalizationType = .allCharacters
+            }
+            confirm.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            confirm.addAction(UIAlertAction(title: "Delete Forever", style: .destructive) { [weak self] _ in
+                guard confirm.textFields?.first?.text == "DELETE" else {
+                    let errorAlert = UIAlertController(
+                        title: "Not Deleted",
+                        message: "You must type DELETE to confirm.",
+                        preferredStyle: .alert
+                    )
+                    errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self?.present(errorAlert, animated: true)
+                    return
+                }
+                self?.authService.deleteAccount { success in
+                    if success {
+                        self?.dismiss(animated: true)
+                    } else {
+                        let errorAlert = UIAlertController(
+                            title: "Error",
+                            message: "Failed to delete account. Please try again later.",
+                            preferredStyle: .alert
+                        )
+                        errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self?.present(errorAlert, animated: true)
+                    }
+                }
+            })
+            self?.present(confirm, animated: true)
+        })
+        present(alert, animated: true)
     }
 }
+
+// MARK: - Apple Sign-In Delegates
 
 extension AccountSettingsSheet: ASAuthorizationControllerDelegate {
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
@@ -773,8 +1311,32 @@ extension AccountSettingsSheet: ASAuthorizationControllerDelegate {
     }
 }
 
+extension AccountSettingsSheet: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField.tag == Self.emailFieldTag {
+            // Move to password field
+            view.viewWithTag(Self.passwordFieldTag)?.becomeFirstResponder()
+        } else {
+            // Dismiss keyboard and trigger sign-in
+            textField.resignFirstResponder()
+        }
+        return true
+    }
+}
+
 extension AccountSettingsSheet: ASAuthorizationControllerPresentationContextProviding {
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
         view.window!
+    }
+}
+
+// MARK: - UIView First Responder Finder
+private extension UIView {
+    func findFirstResponder() -> UIView? {
+        if isFirstResponder { return self }
+        for sub in subviews {
+            if let found = sub.findFirstResponder() { return found }
+        }
+        return nil
     }
 }

@@ -23,4 +23,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.makeKeyAndVisible()
         print("[SceneDelegate] Window is now visible")
     }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard let url = URLContexts.first?.url else { return }
+        print("[SceneDelegate] Received URL: \(url)")
+        AuthService.shared.handleGoogleCallback(url: url)
+    }
 }

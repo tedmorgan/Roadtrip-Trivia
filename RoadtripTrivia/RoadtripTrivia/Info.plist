@@ -64,6 +64,17 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>roadtriptrivia</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.nagrom.roadtrip</string>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

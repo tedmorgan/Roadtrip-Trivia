@@ -232,7 +232,7 @@ class AuthService: NSObject, ObservableObject {
     /// Opens an in-app browser for Google authentication, then exchanges the
     /// callback token with Supabase.
     func signInWithGoogle(presentingViewController: UIViewController, completion: @escaping (Bool, String?) -> Void) {
-        let redirectURL = "\(supabaseURL)/auth/v1/callback"
+        let redirectURL = "roadtriptrivia://auth/callback"
         guard let url = URL(string: "\(supabaseURL)/auth/v1/authorize?provider=google&redirect_to=\(redirectURL)") else {
             completion(false, "Invalid URL")
             return

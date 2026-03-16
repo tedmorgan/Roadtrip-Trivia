@@ -84,9 +84,31 @@ class IPhoneViewController: UIViewController {
 
         observeGameViewModel()
         requestPermissions()
+        startCarPlayPolling()
         updateDisplayMode()
 
         print("[IPhoneViewController] viewDidLoad complete")
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        updateDisplayMode()
+    }
+
+    // MARK: - CarPlay Connection Polling
+
+    private var carPlayPollTimer: Timer?
+    private var lastKnownCarPlayState = false
+
+    private func startCarPlayPolling() {
+        carPlayPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let connected = self.isCarPlayConnected
+            if connected != self.lastKnownCarPlayState {
+                self.lastKnownCarPlayState = connected
+                self.updateDisplayMode()
+            }
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -471,6 +493,10 @@ class IPhoneViewController: UIViewController {
             .store(in: &cancellables)
     }
 
+    private var isCarPlayConnected: Bool {
+        UIApplication.shared.connectedScenes.contains { $0.session.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" }
+    }
+
     private func updateDisplayMode() {
         let isPlaying = [GamePhase.playing, .speaking, .listening, .showingResult, .waiting, .paused].contains(gameViewModel.currentPhase)
         appIconView.isHidden = isPlaying
@@ -478,6 +504,14 @@ class IPhoneViewController: UIViewController {
         subtitleLabel.isHidden = isPlaying
         idleMessageLabel.isHidden = isPlaying
         playingContainer.isHidden = !isPlaying
+
+        if !isPlaying {
+            if isCarPlayConnected {
+                idleMessageLabel.text = "Connected to CarPlay\nStart a game from your car screen!"
+            } else {
+                idleMessageLabel.text = "Connect to CarPlay\nto start playing!"
+            }
+        }
     }
 
     private static let pointsFormatter: NumberFormatter = {
@@ -505,7 +539,6 @@ class IPhoneViewController: UIViewController {
             lightningCardView.isHidden = true
         }
     }
-
     private func requestPermissions() {
         LocationService.shared.requestAuthorization()
         if #available(iOS 17.0, *) {
@@ -995,7 +1028,7 @@ class AccountSettingsSheet: UIViewController {
 
         // Email label
         let emailLabel = UILabel()
-        emailLabel.text = authService.currentEmail ?? "Loading..."
+        emailLabel.text = authService.currentEmail ?? "Signed in"
         emailLabel.font = roundedFont(size: 17, weight: .semibold)
         emailLabel.textColor = .white
         emailLabel.textAlignment = .center
@@ -1004,7 +1037,8 @@ class AccountSettingsSheet: UIViewController {
         // Fetch email if not cached
         if authService.currentEmail == nil {
             authService.fetchUserProfile { [weak emailLabel] email in
-                emailLabel?.text = email ?? "Unknown"
+                guard let email = email else { return }
+                emailLabel?.text = email
             }
         }
 
@@ -1100,6 +1134,7 @@ class AccountSettingsSheet: UIViewController {
     @objc private func handleSignInWithApple() {
         let request = ASAuthorizationAppleIDProvider().createRequest()
         request.requestedScopes = [.email]
+        authService.prepareAppleSignInRequest(request)
         let controller = ASAuthorizationController(authorizationRequests: [request])
         controller.delegate = self
         controller.presentationContextProvider = self
@@ -1299,15 +1334,24 @@ class AccountSettingsSheet: UIViewController {
 extension AccountSettingsSheet: ASAuthorizationControllerDelegate {
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else { return }
-        authService.signInWithApple(credential: credential) { [weak self] _ in
+        activityIndicator.startAnimating()
+        statusLabel.text = nil
+        authService.signInWithApple(credential: credential) { [weak self] success in
             DispatchQueue.main.async {
-                self?.dismiss(animated: true)
+                guard let self = self else { return }
+                self.activityIndicator.stopAnimating()
+                if success {
+                    self.buildAuthenticatedUI()
+                } else {
+                    self.statusLabel.text = "Apple sign-in could not be completed. Please try again."
+                }
             }
         }
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        print("[Auth] Sign in failed: \(error.localizedDescription)")
+        print("[Auth] Apple sign-in failed: \(error.localizedDescription)")
+        statusLabel.text = "Apple sign-in was cancelled or failed."
     }
 }
 

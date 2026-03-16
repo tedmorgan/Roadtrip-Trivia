@@ -140,8 +140,11 @@ class VoiceControlStateManager {
 
     private var hasScore: Bool { totalAnswered > 0 }
 
-    /// Team name or app name for CarPlay display
+    /// Title for CarPlay display.
+    /// Per Defect 8 correction: during play, show the current category
+    /// instead of the team name to make it clear what players are answering.
     private var displayTitle: String {
+        if !currentCategory.isEmpty { return currentCategory }
         if let name = teamName, !name.isEmpty { return name }
         return "Roadtrip Trivia"
     }

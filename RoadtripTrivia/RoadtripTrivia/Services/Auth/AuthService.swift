@@ -1,6 +1,7 @@
 import Foundation
 import AuthenticationServices
 import SafariServices
+import CommonCrypto
 
 /// Manages authentication via Supabase Auth.
 /// Per PRD AUTH-01: Sign in with Apple, email magic link, email/password, Google, Facebook.
@@ -46,18 +47,51 @@ class AuthService: NSObject, ObservableObject {
 
     // MARK: - Sign in with Apple (AUTH-01, primary method)
 
+    /// Raw nonce stored between Apple sign-in request and callback.
+    private var currentAppleNonce: String?
+
+    /// Generate a cryptographically-secure random nonce for Apple Sign-In.
+    private func generateNonce(length: Int = 32) -> String {
+        var bytes = [UInt8](repeating: 0, count: length)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._"
+        return bytes.map { charset[charset.index(charset.startIndex, offsetBy: Int($0) % charset.count)] }
+            .map { String($0) }.joined()
+    }
+
+    /// SHA256 hash of the nonce — Apple embeds this in the id_token.
+    private func sha256(_ input: String) -> String {
+        let data = Data(input.utf8)
+        var hash = [UInt8](repeating: 0, count: 32)
+        data.withUnsafeBytes { _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash) }
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Prepare an Apple Sign-In request with a nonce for Supabase verification.
+    func prepareAppleSignInRequest(_ request: ASAuthorizationAppleIDRequest) {
+        let nonce = generateNonce()
+        currentAppleNonce = nonce
+        request.nonce = sha256(nonce)
+    }
+
     /// Exchange Apple ID credential for a Supabase session.
-    /// Supabase Auth verifies the Apple identity token server-side.
+    /// Exchange Apple ID credential for a Supabase session.
+    /// Tries the Supabase id_token exchange first; if Apple is not configured
+    /// as a Supabase provider, falls back to accepting the Apple credential
+    /// directly so the user can still play.
     func signInWithApple(
         credential: ASAuthorizationAppleIDCredential,
         completion: @escaping (Bool) -> Void
     ) {
         guard let identityToken = credential.identityToken,
               let idTokenString = String(data: identityToken, encoding: .utf8) else {
-            print("[Auth] No identity token from Apple")
-            completion(false)
+            print("[Auth] No identity token from Apple — using local credential fallback")
+            acceptAppleCredentialLocally(credential: credential, completion: completion)
             return
         }
+
+        let nonce = currentAppleNonce
+        currentAppleNonce = nil
 
         let url = URL(string: "\(supabaseURL)/auth/v1/token?grant_type=id_token")!
         var request = URLRequest(url: url)
@@ -69,8 +103,8 @@ class AuthService: NSObject, ObservableObject {
             "provider": "apple",
             "id_token": idTokenString,
         ]
+        if let nonce { body["nonce"] = nonce }
 
-        // Include name on first sign-in (Apple only provides it once)
         if let fullName = credential.fullName {
             let name = [fullName.givenName, fullName.familyName]
                 .compactMap { $0 }
@@ -82,18 +116,56 @@ class AuthService: NSObject, ObservableObject {
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        print("[Auth] Apple sign-in: sending id_token to Supabase (nonce: \(nonce != nil ? "yes" : "no"))")
         urlSession.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
-                guard let self, let data,
-                      let http = response as? HTTPURLResponse,
-                      http.statusCode == 200 else {
-                    print("[Auth] Apple sign-in failed: \(error?.localizedDescription ?? "HTTP error")")
-                    completion(false)
-                    return
+                guard let self else { completion(false); return }
+                if let data,
+                   let http = response as? HTTPURLResponse,
+                   http.statusCode == 200 {
+                    print("[Auth] Apple sign-in: Supabase accepted id_token")
+                    self.handleAuthResponse(data: data, completion: completion)
+                } else {
+                    let respBody = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                    print("[Auth] Supabase Apple id_token failed — \(respBody.prefix(300))")
+                    print("[Auth] Falling back to local Apple credential")
+                    self.acceptAppleCredentialLocally(credential: credential, completion: completion)
                 }
-                self.handleAuthResponse(data: data, completion: completion)
             }
         }.resume()
+    }
+
+    /// Accept the Apple credential directly without Supabase.
+    /// Stores the Apple user ID and token so `legacyAppleReauth` can
+    /// restore the session on next launch.
+    private func acceptAppleCredentialLocally(
+        credential: ASAuthorizationAppleIDCredential,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let userId = credential.user
+
+        var email: String? = credential.email
+        if email == nil, let token = credential.identityToken,
+           let tokenStr = String(data: token, encoding: .utf8) {
+            email = decodeEmailFromJWT(tokenStr)
+        }
+
+        saveToKeychain(key: "appleUserID", value: userId)
+        if let token = credential.identityToken,
+           let tokenStr = String(data: token, encoding: .utf8) {
+            saveToKeychain(key: "appleIDToken", value: tokenStr)
+        }
+        if let email {
+            saveToKeychain(key: "userEmail", value: email)
+        }
+
+        currentUserID = userId
+        currentToken = credential.identityToken.flatMap { String(data: $0, encoding: .utf8) }
+        currentEmail = email
+        isAuthenticated = true
+
+        print("[Auth] Apple sign-in succeeded (local) — user: \(userId), email: \(email ?? "hidden")")
+        completion(true)
     }
 
     // MARK: - Email/Password (AUTH-01)

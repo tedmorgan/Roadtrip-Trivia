@@ -54,6 +54,7 @@ class RealtimeGameCoordinator: ObservableObject {
 
     // Bug 23: Track whether user has played before (for first-time instructions)
     private let hasPlayedBeforeKey = "hasPlayedBefore"
+    private var isFirstGameSession = false
 
     // MARK: - Init
 
@@ -79,6 +80,7 @@ class RealtimeGameCoordinator: ObservableObject {
 
         // Bug 23: Check if this is the user's first game
         let isFirstGame = !UserDefaults.standard.bool(forKey: hasPlayedBeforeKey)
+        isFirstGameSession = isFirstGame
 
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: locationService.currentLocationLabel,
@@ -378,7 +380,8 @@ class RealtimeGameCoordinator: ObservableObject {
         let trimmedConfig = SystemPromptBuilder.buildTrimmedSessionConfig(
             locationLabel: locationService.currentLocationLabel,
             difficulty: difficulty,
-            questionHistory: questionHistory.isEmpty ? nil : questionHistory
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
+            isFirstGame: isFirstGameSession
         )
         Task {
             try? await sessionManager.send(.sessionUpdate(trimmedConfig))

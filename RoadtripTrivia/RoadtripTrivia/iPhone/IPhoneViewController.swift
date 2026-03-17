@@ -50,6 +50,7 @@ class IPhoneViewController: UIViewController {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let idleMessageLabel = UILabel()
+    private let signInNoticeLabel = UILabel()
 
     // Playing state views (stacked in a container)
     private let playingContainer = UIView()
@@ -86,6 +87,15 @@ class IPhoneViewController: UIViewController {
         requestPermissions()
         startCarPlayPolling()
         updateDisplayMode()
+
+        // Show "sign in to play" notice until user is authenticated
+        signInNoticeLabel.isHidden = authService.isAuthenticated
+        authService.$isAuthenticated
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isAuthed in
+                self?.signInNoticeLabel.isHidden = isAuthed
+            }
+            .store(in: &cancellables)
 
         print("[IPhoneViewController] viewDidLoad complete")
     }
@@ -267,10 +277,18 @@ class IPhoneViewController: UIViewController {
         idleMessageLabel.numberOfLines = 0
         applyNeonGlow(to: idleMessageLabel, color: colorNeonYellow, radius: 15, opacity: 0.7)
 
+        signInNoticeLabel.translatesAutoresizingMaskIntoConstraints = false
+        signInNoticeLabel.text = "Sign in or create an account on your iPhone before playing on CarPlay."
+        signInNoticeLabel.font = roundedFont(size: 14, weight: .medium)
+        signInNoticeLabel.textColor = UIColor.systemOrange
+        signInNoticeLabel.textAlignment = .center
+        signInNoticeLabel.numberOfLines = 0
+
         contentView.addSubview(appIconView)
         contentView.addSubview(titleLabel)
         contentView.addSubview(subtitleLabel)
         contentView.addSubview(idleMessageLabel)
+        contentView.addSubview(signInNoticeLabel)
 
         NSLayoutConstraint.activate([
             appIconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 40),
@@ -286,10 +304,14 @@ class IPhoneViewController: UIViewController {
             subtitleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             subtitleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
-            idleMessageLabel.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 50),
+            idleMessageLabel.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 32),
             idleMessageLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             idleMessageLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            idleMessageLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
+
+            signInNoticeLabel.topAnchor.constraint(equalTo: idleMessageLabel.bottomAnchor, constant: 12),
+            signInNoticeLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            signInNoticeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            signInNoticeLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
         ])
     }
 

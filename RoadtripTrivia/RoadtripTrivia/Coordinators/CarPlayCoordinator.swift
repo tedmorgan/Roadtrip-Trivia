@@ -36,6 +36,7 @@ class CarPlayCoordinator: NSObject {
     // MARK: - Services
     private let persistenceService = SessionPersistenceService.shared
     private let gameViewModel = GameViewModel.shared
+    private let authService = AuthService.shared
 
     init(interfaceController: CPInterfaceController) {
         self.interfaceController = interfaceController
@@ -50,12 +51,33 @@ class CarPlayCoordinator: NSObject {
         let homeTemplate = buildHomeTemplate()
         interfaceController.setRootTemplate(homeTemplate, animated: true, completion: nil)
         observeGameState()
+
+        // Rebuild home screen when auth state changes so "Sign In to Play"
+        // is cleared once the user signs in on iPhone.
+        authService.$isAuthenticated
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let newHome = self.buildHomeTemplate()
+                self.interfaceController.setRootTemplate(newHome, animated: false, completion: nil)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Home Template (Depth 1)
 
     private func buildHomeTemplate() -> CPListTemplate {
         var mainItems: [CPListItem] = []
+
+        // Require user account before allowing play (CP-AUTH-01).
+        if !authService.canPlayOnCarPlay {
+            let lockedItem = CPListItem(
+                text: "Sign In to Play",
+                detailText: "Open Roadtrip Trivia on your iPhone to sign in or create an account, then return here to start a game."
+            )
+            let section = CPListSection(items: [lockedItem], header: nil, sectionIndexTitle: nil)
+            return CPListTemplate(title: "Roadtrip Trivia", sections: [section])
+        }
 
         // Start New Game — always visible
         let startItem = CPListItem(

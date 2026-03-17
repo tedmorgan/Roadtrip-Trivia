@@ -608,6 +608,7 @@ class RealtimeGameCoordinator: ObservableObject {
         // Save completed session to history (Bug 8)
         if let session = gameViewModel.currentSession {
             persistence.saveCompletedSession(session)
+            submitScoreToLeaderboard(from: session)
         }
 
         // Clear checkpoint so home screen won't show "Resume"
@@ -621,6 +622,30 @@ class RealtimeGameCoordinator: ObservableObject {
         }
 
         submitResultImmediate(callId: callId, result: ["acknowledged": true])
+    }
+
+    // MARK: - Leaderboard Submission
+
+    private func submitScoreToLeaderboard(from session: TriviaSession) {
+        let teamName = session.teamName ?? "Roadtrip Team"
+        let points = session.totalQuestionsCorrect * session.difficulty.pointsPerCorrect
+
+        let auth = AuthService.shared
+        let baseURL = auth.supabaseApiBaseURL
+        let apiKey = auth.supabaseApiKey
+
+        guard let url = URL(string: "/rest/v1/leaderboard_scores", relativeTo: baseURL) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        let body: [String: Any] = [
+            "team_name": teamName,
+            "score": points
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request).resume()
     }
 
     // MARK: - Lightning Round Timer (LTNG-08, CP-SCORE-06)
@@ -782,6 +807,46 @@ class RealtimeGameCoordinator: ObservableObject {
         audioService.stopStreaming()
         gameViewModel.transition(to: .paused)
         gameViewModel.connectionError = "Connection lost. Your game has been saved."
+    }
+
+    // MARK: - Pause/Resume (CarPlay hardware button)
+
+    /// Pause the game — called when user presses pause button on CarPlay.
+    func pauseGame() {
+        let phase = gameViewModel.currentPhase
+        guard phase != .paused && phase != .idle && phase != .gameOver else {
+            print("[RealtimeGame] Pause ignored — already paused or not playing")
+            return
+        }
+        print("[RealtimeGame] Pausing game (was: \(phase))")
+        lightningTimer?.invalidate()
+        lightningTimer = nil
+        audioService.stopStreaming()
+        gameViewModel.transition(to: .paused)
+    }
+
+    /// Resume the game — called when user presses play button on CarPlay.
+    func resumeGame() {
+        let phase = gameViewModel.currentPhase
+        guard phase == .paused else {
+            print("[RealtimeGame] Resume ignored — not paused (current: \(phase))")
+            return
+        }
+        print("[RealtimeGame] Resuming game")
+        do {
+            audioManager.activateForSpeech()
+            try audioService.startStreaming()
+            gameViewModel.transition(to: .playing)
+
+            Task {
+                try? await sessionManager.send(.responseCreate(
+                    instructions: "The player resumed the game. Welcome them back and continue with the next question."
+                ))
+            }
+        } catch {
+            print("[RealtimeGame] Failed to resume: \(error)")
+            gameViewModel.connectionError = "Failed to resume. Please restart the game."
+        }
     }
 
     // MARK: - Interruption Handling

@@ -193,6 +193,15 @@ class IPhoneViewController: UIViewController {
         // No title in nav bar — the big neon title is in the content
         navigationItem.titleView = UIView()
 
+        let trophyButton = UIBarButtonItem(
+            image: UIImage(systemName: "trophy.fill"),
+            style: .plain,
+            target: self,
+            action: #selector(showLeaderboards)
+        )
+        trophyButton.tintColor = colorNeonCyan
+        navigationItem.leftBarButtonItem = trophyButton
+
         let gearButton = UIBarButtonItem(
             image: UIImage(systemName: "gearshape.fill"),
             style: .plain,
@@ -563,7 +572,258 @@ class IPhoneViewController: UIViewController {
         }
         present(nav, animated: true)
     }
+
+    @objc private func showLeaderboards() {
+        let vc = LeaderboardViewController()
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
 }
+
+// MARK: - Leaderboards
+
+enum LeaderboardPeriod: String, CaseIterable {
+    case day = "day"
+    case month = "month"
+    case allTime = "all"
+
+    var title: String {
+        switch self {
+        case .day: return "Today"
+        case .month: return "This Month"
+        case .allTime: return "All Time"
+        }
+    }
+}
+
+struct LeaderboardEntry: Decodable {
+    let team_name: String
+    let score: Int
+    let played_at: String?
+}
+
+final class LeaderboardViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+
+    private let periods: [LeaderboardPeriod] = [.day, .month, .allTime]
+    private var selectedPeriod: LeaderboardPeriod = .day
+    private var entries: [LeaderboardEntry] = []
+
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    private let segmentedControl = UISegmentedControl(items: ["Today", "This Month", "All Time"])
+    private let activity = UIActivityIndicatorView(style: .large)
+    private let errorLabel = UILabel()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        view.backgroundColor = UIColor.black
+        title = "Leaderboards"
+
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done,
+            target: self,
+            action: #selector(dismissSelf)
+        )
+
+        setupSegmentedControl()
+        setupTableView()
+        setupActivity()
+        setupErrorLabel()
+
+        loadData()
+    }
+
+    @objc private func dismissSelf() {
+        dismiss(animated: true)
+    }
+
+    private func setupSegmentedControl() {
+        segmentedControl.selectedSegmentIndex = 0
+        segmentedControl.addTarget(self, action: #selector(periodChanged), for: .valueChanged)
+        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
+
+        // Improve contrast so non-selected segments are still clearly visible.
+        segmentedControl.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        segmentedControl.selectedSegmentTintColor = UIColor.white
+        segmentedControl.setTitleTextAttributes(
+            [.foregroundColor: UIColor.black,
+             .font: UIFont.systemFont(ofSize: 14, weight: .semibold)],
+            for: .selected
+        )
+        segmentedControl.setTitleTextAttributes(
+            [.foregroundColor: UIColor.white.withAlphaComponent(0.8),
+             .font: UIFont.systemFont(ofSize: 14, weight: .regular)],
+            for: .normal
+        )
+
+        view.addSubview(segmentedControl)
+
+        NSLayoutConstraint.activate([
+            segmentedControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            segmentedControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            segmentedControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+        ])
+    }
+
+    private func setupTableView() {
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.backgroundColor = .clear
+        tableView.separatorStyle = .none
+        view.addSubview(tableView)
+
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 12),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func setupActivity() {
+        activity.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(activity)
+        NSLayoutConstraint.activate([
+            activity.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            activity.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+
+    private func setupErrorLabel() {
+        errorLabel.translatesAutoresizingMaskIntoConstraints = false
+        errorLabel.textColor = .systemOrange
+        errorLabel.numberOfLines = 0
+        errorLabel.textAlignment = .center
+        errorLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        errorLabel.isHidden = true
+        view.addSubview(errorLabel)
+
+        NSLayoutConstraint.activate([
+            errorLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            errorLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            errorLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+
+    @objc private func periodChanged() {
+        selectedPeriod = periods[segmentedControl.selectedSegmentIndex]
+        loadData()
+    }
+
+    private func loadData() {
+        errorLabel.isHidden = true
+        activity.startAnimating()
+
+        fetchLeaderboard(period: selectedPeriod) { [weak self] result in
+            guard let self else { return }
+            self.activity.stopAnimating()
+            switch result {
+            case .success(let entries):
+                self.entries = entries
+                self.tableView.reloadData()
+            case .failure(let error):
+                self.errorLabel.text = "Failed to load leaderboards:\n\(error.localizedDescription)"
+                self.errorLabel.isHidden = false
+            }
+        }
+    }
+
+    private func fetchLeaderboard(period: LeaderboardPeriod,
+                                  completion: @escaping (Result<[LeaderboardEntry], Error>) -> Void) {
+        let auth = AuthService.shared
+        let baseURL = auth.supabaseApiBaseURL
+        let apiKey = auth.supabaseApiKey
+
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("/rest/v1/leaderboard_scores"),
+            resolvingAgainstBaseURL: false
+        ) else { return }
+
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "select", value: "team_name,score,played_at"),
+            URLQueryItem(name: "order", value: "score.desc"),
+            URLQueryItem(name: "limit", value: "50")
+        ]
+
+        let now = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime]
+
+        switch period {
+        case .day:
+            if let startOfDay = Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: now) {
+                queryItems.append(URLQueryItem(name: "played_at", value: "gte.\(isoFormatter.string(from: startOfDay))"))
+            }
+        case .month:
+            if let startOfMonth = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: now)) {
+                queryItems.append(URLQueryItem(name: "played_at", value: "gte.\(isoFormatter.string(from: startOfMonth))"))
+            }
+        case .allTime:
+            break
+        }
+
+        components.queryItems = queryItems
+        guard let url = components.url else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+            guard let http = response as? HTTPURLResponse,
+                  let data = data else {
+                DispatchQueue.main.async { completion(.success([])) }
+                return
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                let err = NSError(domain: "Leaderboard",
+                                  code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: body])
+                DispatchQueue.main.async { completion(.failure(err)) }
+                return
+            }
+            do {
+                let entries = try JSONDecoder().decode([LeaderboardEntry].self, from: data)
+                DispatchQueue.main.async { completion(.success(entries)) }
+            } catch {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("[Leaderboard] Decode failed: \(error). Body: \(body)")
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }.resume()
+    }
+
+    // MARK: - UITableViewDataSource
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        entries.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cellId = "cell"
+        let cell = tableView.dequeueReusableCell(withIdentifier: cellId) ??
+            UITableViewCell(style: .subtitle, reuseIdentifier: cellId)
+
+        let entry = entries[indexPath.row]
+        cell.backgroundColor = .clear
+        cell.textLabel?.textColor = .white
+        cell.detailTextLabel?.textColor = .lightGray
+
+        let rank = indexPath.row + 1
+        cell.textLabel?.text = "#\(rank)  \(entry.team_name)"
+        cell.detailTextLabel?.text = "\(entry.score) pts"
+
+        return cell
+    }
+}
+
 
 // MARK: - Account Settings Sheet
 

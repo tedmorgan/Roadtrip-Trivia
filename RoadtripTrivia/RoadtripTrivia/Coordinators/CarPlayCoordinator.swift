@@ -232,6 +232,36 @@ class CarPlayCoordinator: NSObject {
         )
     }
 
+    // MARK: - Play/Pause (CarPlay hardware button)
+
+    /// Handle explicit play/pause from CarPlay hardware button.
+    func handlePlayPause(paused: Bool) {
+        guard realtimeCoordinator != nil else {
+            print("[CarPlay] Play/pause ignored — no active game")
+            return
+        }
+        if paused {
+            realtimeCoordinator?.pauseGame()
+        } else {
+            realtimeCoordinator?.resumeGame()
+        }
+    }
+
+    /// Toggle play/pause from CarPlay hardware button.
+    func togglePlayPause() {
+        guard realtimeCoordinator != nil else {
+            print("[CarPlay] Toggle ignored — no active game")
+            return
+        }
+        // Check current phase to determine toggle direction
+        let currentPhase = gameViewModel.currentPhase
+        if currentPhase == .paused {
+            realtimeCoordinator?.resumeGame()
+        } else if [.playing, .speaking, .listening, .showingResult].contains(currentPhase) {
+            realtimeCoordinator?.pauseGame()
+        }
+    }
+
     private func resumeGame(from checkpoint: SessionCheckpoint) {
         pushPlayingTemplate()
         realtimeCoordinator = RealtimeGameCoordinator(

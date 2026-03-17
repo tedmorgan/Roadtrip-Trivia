@@ -174,7 +174,7 @@ struct SystemPromptBuilder {
             """
         } else {
             let rulesNote = isFirstGame
-                ? "After config, explain: 2 hints/round, 1 challenge/round, lightning every 4 rounds."
+                ? "After config, explain: 2 hints/round, 1 challenge/round, lightning every 4 rounds. Also tell the player: \"Keep the app open on your iPhone while you plan to follow your score.\""
                 : "After config, skip rules — player knows them. Jump right in."
 
             prompt += """

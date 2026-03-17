@@ -26,12 +26,14 @@ class AudioSessionManager: ObservableObject {
     // MARK: - Configuration
 
     /// Initial setup — call once at app launch.
+    /// Use an exclusive category (no duck/mix options) so that when Roadtrip's
+    /// session is activated, other spoken‑audio apps are paused by the system.
     func configureForCarPlay() {
         do {
             try session.setCategory(
                 .playAndRecord,
                 mode: .voiceChat,
-                options: [.defaultToSpeaker, .allowBluetooth, .duckOthers]
+                options: [.defaultToSpeaker, .allowBluetooth]
             )
         } catch {
             print("[AudioSessionManager] Failed to configure: \(error)")

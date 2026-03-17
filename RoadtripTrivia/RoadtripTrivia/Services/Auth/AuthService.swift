@@ -25,6 +25,10 @@ class AuthService: NSObject, ObservableObject {
     /// Get this from: Supabase Dashboard → Settings → API → anon/public key
     private let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtha2h6YmN1dWRrcnJrdGtvYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDgzNzQsImV4cCI6MjA4Nzg4NDM3NH0.0AN73dPhhqOrRxPcOIODO58fanDKbPvJfUkqiovk4GQ"
 
+    // Expose read-only access for other services
+    var supabaseApiBaseURL: URL { URL(string: supabaseURL)! }
+    var supabaseApiKey: String { supabaseAnonKey }
+
     private let keychainService = "com.nagrom.roadtrip.auth"
     private let urlSession: URLSession
 

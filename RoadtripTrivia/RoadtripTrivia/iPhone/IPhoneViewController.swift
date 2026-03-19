@@ -625,6 +625,72 @@ struct LeaderboardEntry: Decodable {
     let played_at: String?
 }
 
+// MARK: - Leaderboard row (Rank | Team | Points)
+
+private final class LeaderboardRowCell: UITableViewCell {
+    static let reuseIdentifier = "LeaderboardRowCell"
+
+    private let rankLabel: UILabel = {
+        let l = UILabel()
+        l.font = .monospacedDigitSystemFont(ofSize: 16, weight: .bold)
+        l.textColor = .white
+        l.textAlignment = .center
+        l.translatesAutoresizingMaskIntoConstraints = false
+        return l
+    }()
+
+    private let teamLabel: UILabel = {
+        let l = UILabel()
+        l.font = .systemFont(ofSize: 16, weight: .semibold)
+        l.textColor = .white
+        l.translatesAutoresizingMaskIntoConstraints = false
+        l.adjustsFontSizeToFitWidth = true
+        l.minimumScaleFactor = 0.75
+        l.lineBreakMode = .byTruncatingTail
+        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return l
+    }()
+
+    private let pointsLabel: UILabel = {
+        let l = UILabel()
+        l.font = .monospacedDigitSystemFont(ofSize: 16, weight: .semibold)
+        l.textColor = UIColor(red: 1, green: 0.88, blue: 0.2, alpha: 1)
+        l.textAlignment = .right
+        l.translatesAutoresizingMaskIntoConstraints = false
+        return l
+    }()
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .clear
+        selectionStyle = .none
+        contentView.addSubview(rankLabel)
+        contentView.addSubview(teamLabel)
+        contentView.addSubview(pointsLabel)
+        NSLayoutConstraint.activate([
+            rankLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            rankLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            rankLabel.widthAnchor.constraint(equalToConstant: 44),
+
+            pointsLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            pointsLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            pointsLabel.widthAnchor.constraint(equalToConstant: 80),
+
+            teamLabel.leadingAnchor.constraint(equalTo: rankLabel.trailingAnchor, constant: 12),
+            teamLabel.trailingAnchor.constraint(equalTo: pointsLabel.leadingAnchor, constant: -12),
+            teamLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(rank: Int, team: String, points: Int) {
+        rankLabel.text = "\(rank)"
+        teamLabel.text = team
+        pointsLabel.text = "\(points)"
+    }
+}
+
 final class LeaderboardViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
 
     private let periods: [LeaderboardPeriod] = [.day, .month, .allTime]
@@ -633,6 +699,7 @@ final class LeaderboardViewController: UIViewController, UITableViewDataSource, 
 
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let segmentedControl = UISegmentedControl(items: ["Today", "This Month", "All Time"])
+    private let columnHeaderContainer = UIView()
     private let activity = UIActivityIndicatorView(style: .large)
     private let errorLabel = UILabel()
 
@@ -649,9 +716,12 @@ final class LeaderboardViewController: UIViewController, UITableViewDataSource, 
         )
 
         setupSegmentedControl()
+        setupColumnHeader()
         setupTableView()
         setupActivity()
         setupErrorLabel()
+
+        tableView.register(LeaderboardRowCell.self, forCellReuseIdentifier: LeaderboardRowCell.reuseIdentifier)
 
         loadData()
     }
@@ -688,16 +758,67 @@ final class LeaderboardViewController: UIViewController, UITableViewDataSource, 
         ])
     }
 
+    private func setupColumnHeader() {
+        columnHeaderContainer.translatesAutoresizingMaskIntoConstraints = false
+        columnHeaderContainer.backgroundColor = UIColor.white.withAlphaComponent(0.1)
+
+        let rank = UILabel()
+        rank.text = "Rank"
+        rank.font = .systemFont(ofSize: 13, weight: .semibold)
+        rank.textColor = UIColor.lightGray
+        rank.textAlignment = .center
+        rank.translatesAutoresizingMaskIntoConstraints = false
+
+        let team = UILabel()
+        team.text = "Team"
+        team.font = .systemFont(ofSize: 13, weight: .semibold)
+        team.textColor = UIColor.lightGray
+        team.translatesAutoresizingMaskIntoConstraints = false
+
+        let pts = UILabel()
+        pts.text = "Points"
+        pts.font = .systemFont(ofSize: 13, weight: .semibold)
+        pts.textColor = UIColor.lightGray
+        pts.textAlignment = .right
+        pts.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(columnHeaderContainer)
+        columnHeaderContainer.addSubview(rank)
+        columnHeaderContainer.addSubview(team)
+        columnHeaderContainer.addSubview(pts)
+
+        NSLayoutConstraint.activate([
+            columnHeaderContainer.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 12),
+            columnHeaderContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            columnHeaderContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            columnHeaderContainer.heightAnchor.constraint(equalToConstant: 40),
+
+            rank.leadingAnchor.constraint(equalTo: columnHeaderContainer.leadingAnchor, constant: 16),
+            rank.centerYAnchor.constraint(equalTo: columnHeaderContainer.centerYAnchor),
+            rank.widthAnchor.constraint(equalToConstant: 44),
+
+            pts.trailingAnchor.constraint(equalTo: columnHeaderContainer.trailingAnchor, constant: -16),
+            pts.centerYAnchor.constraint(equalTo: columnHeaderContainer.centerYAnchor),
+            pts.widthAnchor.constraint(equalToConstant: 80),
+
+            team.leadingAnchor.constraint(equalTo: rank.trailingAnchor, constant: 12),
+            team.trailingAnchor.constraint(equalTo: pts.leadingAnchor, constant: -12),
+            team.centerYAnchor.constraint(equalTo: columnHeaderContainer.centerYAnchor)
+        ])
+    }
+
     private func setupTableView() {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = .clear
         tableView.separatorStyle = .none
+        tableView.rowHeight = 52
+        tableView.estimatedRowHeight = 52
         view.addSubview(tableView)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 12),
+            tableView.topAnchor.constraint(equalTo: columnHeaderContainer.bottomAnchor, constant: 4),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -766,7 +887,7 @@ final class LeaderboardViewController: UIViewController, UITableViewDataSource, 
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "select", value: "team_name,score,played_at"),
             URLQueryItem(name: "order", value: "score.desc"),
-            URLQueryItem(name: "limit", value: "50")
+            URLQueryItem(name: "limit", value: "15")
         ]
 
         let now = Date()
@@ -829,19 +950,9 @@ final class LeaderboardViewController: UIViewController, UITableViewDataSource, 
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cellId = "cell"
-        let cell = tableView.dequeueReusableCell(withIdentifier: cellId) ??
-            UITableViewCell(style: .subtitle, reuseIdentifier: cellId)
-
+        let cell = tableView.dequeueReusableCell(withIdentifier: LeaderboardRowCell.reuseIdentifier, for: indexPath) as! LeaderboardRowCell
         let entry = entries[indexPath.row]
-        cell.backgroundColor = .clear
-        cell.textLabel?.textColor = .white
-        cell.detailTextLabel?.textColor = .lightGray
-
-        let rank = indexPath.row + 1
-        cell.textLabel?.text = "#\(rank)  \(entry.team_name)"
-        cell.detailTextLabel?.text = "\(entry.score) pts"
-
+        cell.configure(rank: indexPath.row + 1, team: entry.team_name, points: entry.score)
         return cell
     }
 }

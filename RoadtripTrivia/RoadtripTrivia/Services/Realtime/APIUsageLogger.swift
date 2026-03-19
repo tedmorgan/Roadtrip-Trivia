@@ -1,6 +1,6 @@
 import Foundation
 
-/// Logs GPT-realtime API usage (calls sent, responses received, token counts)
+/// Logs only Realtime `response.done` token usage (including text/audio/cached breakdown when present)
 /// to a file in the app's Documents directory for cost review.
 ///
 /// Log file location: Documents/api_usage.log
@@ -38,8 +38,6 @@ class APIUsageLogger {
 
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         fileHandle?.seekToEndOfFile()
-
-        writeEntry("=== API Usage Logger started ===")
     }
 
     deinit {
@@ -69,40 +67,9 @@ class APIUsageLogger {
         if let phase { contextPhase = phase }
     }
 
-    /// Log an outgoing API call (client → server).
-    func logOutgoingEvent(type: String, payloadBytes: Int) {
-        let estimatedTokens = max(1, payloadBytes / 4)
-        writeEntry("[SEND] type=\(type) | payload_bytes=\(payloadBytes) | est_input_tokens=\(estimatedTokens)")
-    }
-
-    /// Log a session.update which contains the system prompt (major token cost).
-    func logSessionUpdate(promptLength: Int, toolCount: Int) {
-        let estimatedTokens = max(1, promptLength / 4)
-        writeEntry("[SEND] type=session.update | prompt_chars=\(promptLength) | est_prompt_tokens=\(estimatedTokens) | tools=\(toolCount)")
-    }
-
-    /// Log an incoming API event (server → client).
-    func logIncomingEvent(type: String, payloadBytes: Int) {
-        writeEntry("[RECV] type=\(type) | payload_bytes=\(payloadBytes)")
-    }
-
-    /// Log a response.done event with usage/token data if available.
-    func logResponseDone(status: String, usage: ResponseUsage?) {
-        if let usage = usage {
-            writeEntry("[RECV] type=response.done | status=\(status) | input_tokens=\(usage.inputTokens) | output_tokens=\(usage.outputTokens) | total_tokens=\(usage.totalTokens)")
-        } else {
-            writeEntry("[RECV] type=response.done | status=\(status) | tokens=unavailable")
-        }
-    }
-
-    /// Log an audio chunk (aggregated, not per-chunk).
-    func logAudioSent(chunkCount: Int, totalBytes: Int) {
-        writeEntry("[SEND] type=audio_chunks | chunks=\(chunkCount) | total_bytes=\(totalBytes)")
-    }
-
-    /// Log a connection event.
-    func logConnection(event: String) {
-        writeEntry("[CONN] \(event)")
+    /// Log a `response.done` event when the API includes a `usage` object (real token counts + modality breakdown).
+    func logResponseDone(status: String, usage: ResponseUsage) {
+        writeEntry("[RECV] type=response.done | status=\(status) | input_tokens=\(usage.inputTokens) | output_tokens=\(usage.outputTokens) | total_tokens=\(usage.totalTokens)\(usage.detailLogSuffix())")
     }
 
     // MARK: - Private
@@ -131,9 +98,108 @@ class APIUsageLogger {
     }
 }
 
-/// Token usage data extracted from response.done events.
+/// Token usage extracted from Realtime `response.done` → `response.usage`.
+/// See OpenAI Realtime cost docs: `input_token_details`, `output_token_details`, cached input breakdown.
 struct ResponseUsage {
     let inputTokens: Int
     let outputTokens: Int
     let totalTokens: Int
+
+    /// `input_token_details.text_tokens`
+    let inputTextTokens: Int?
+    /// `input_token_details.audio_tokens`
+    let inputAudioTokens: Int?
+    /// `input_token_details.image_tokens`
+    let inputImageTokens: Int?
+
+    /// `input_token_details.cached_tokens`
+    let cachedInputTokens: Int?
+    /// `input_token_details.cached_tokens_details.text_tokens`
+    let cachedInputTextTokens: Int?
+    /// `input_token_details.cached_tokens_details.audio_tokens`
+    let cachedInputAudioTokens: Int?
+    /// `input_token_details.cached_tokens_details.image_tokens`
+    let cachedInputImageTokens: Int?
+
+    /// `output_token_details.text_tokens`
+    let outputTextTokens: Int?
+    /// `output_token_details.audio_tokens`
+    let outputAudioTokens: Int?
+    /// `output_token_details.image_tokens`
+    let outputImageTokens: Int?
+
+    /// Build from JSON `usage` object on `response.done`.
+    static func from(usageDictionary d: [String: Any]) -> ResponseUsage {
+        let input = intFromJSON(d["input_tokens"]) ?? intFromJSON(d["total_tokens"]) ?? 0
+        let output = intFromJSON(d["output_tokens"]) ?? 0
+        let total = intFromJSON(d["total_tokens"]) ?? (input + output)
+
+        var inText: Int?
+        var inAudio: Int?
+        var inImage: Int?
+        var cached: Int?
+        var cachedText: Int?
+        var cachedAudio: Int?
+        var cachedImage: Int?
+
+        if let inDet = d["input_token_details"] as? [String: Any] {
+            inText = intFromJSON(inDet["text_tokens"])
+            inAudio = intFromJSON(inDet["audio_tokens"])
+            inImage = intFromJSON(inDet["image_tokens"])
+            cached = intFromJSON(inDet["cached_tokens"])
+            if let ctd = inDet["cached_tokens_details"] as? [String: Any] {
+                cachedText = intFromJSON(ctd["text_tokens"])
+                cachedAudio = intFromJSON(ctd["audio_tokens"])
+                cachedImage = intFromJSON(ctd["image_tokens"])
+            }
+        }
+
+        var outText: Int?
+        var outAudio: Int?
+        var outImage: Int?
+        if let outDet = d["output_token_details"] as? [String: Any] {
+            outText = intFromJSON(outDet["text_tokens"])
+            outAudio = intFromJSON(outDet["audio_tokens"])
+            outImage = intFromJSON(outDet["image_tokens"])
+        }
+
+        return ResponseUsage(
+            inputTokens: input,
+            outputTokens: output,
+            totalTokens: total,
+            inputTextTokens: inText,
+            inputAudioTokens: inAudio,
+            inputImageTokens: inImage,
+            cachedInputTokens: cached,
+            cachedInputTextTokens: cachedText,
+            cachedInputAudioTokens: cachedAudio,
+            cachedInputImageTokens: cachedImage,
+            outputTextTokens: outText,
+            outputAudioTokens: outAudio,
+            outputImageTokens: outImage
+        )
+    }
+
+    /// Appends `| in_text=… | in_audio=…` etc. only for fields the API provided.
+    func detailLogSuffix() -> String {
+        var parts: [String] = []
+        if let v = inputTextTokens { parts.append("in_text=\(v)") }
+        if let v = inputAudioTokens { parts.append("in_audio=\(v)") }
+        if let v = inputImageTokens { parts.append("in_image=\(v)") }
+        if let v = cachedInputTokens { parts.append("cached_in=\(v)") }
+        if let v = cachedInputTextTokens { parts.append("cached_in_text=\(v)") }
+        if let v = cachedInputAudioTokens { parts.append("cached_in_audio=\(v)") }
+        if let v = cachedInputImageTokens { parts.append("cached_in_image=\(v)") }
+        if let v = outputTextTokens { parts.append("out_text=\(v)") }
+        if let v = outputAudioTokens { parts.append("out_audio=\(v)") }
+        if let v = outputImageTokens { parts.append("out_image=\(v)") }
+        guard !parts.isEmpty else { return "" }
+        return " | " + parts.joined(separator: " | ")
+    }
+
+    private static func intFromJSON(_ any: Any?) -> Int? {
+        if let i = any as? Int { return i }
+        if let n = any as? NSNumber { return n.intValue }
+        return nil
+    }
 }

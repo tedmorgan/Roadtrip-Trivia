@@ -76,17 +76,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             throw RealtimeError.sendFailed("Could not encode event as UTF-8 string")
         }
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let eventType = json["type"] as? String {
-            if !eventType.contains("audio_buffer") {
-                print("[Realtime] Sending: \(eventType)")
-                if eventType == "session.update" {
-                    let promptLen = (json["session"] as? [String: Any])?["instructions"] as? String
-                    let toolCount = ((json["session"] as? [String: Any])?["tools"] as? [[String: Any]])?.count ?? 0
-                    apiLogger.logSessionUpdate(promptLength: promptLen?.count ?? 0, toolCount: toolCount)
-                } else {
-                    apiLogger.logOutgoingEvent(type: eventType, payloadBytes: data.count)
-                }
-            }
+           let eventType = json["type"] as? String,
+           !eventType.contains("audio_buffer") {
+            print("[Realtime] Sending: \(eventType)")
         }
         try await ws.send(.string(jsonString))
     }
@@ -106,7 +98,6 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         isConnected = false
         currentSessionConfig = nil
         print("[Realtime] Disconnected")
-        apiLogger.logConnection(event: "Disconnected")
     }
 
     /// Submit a function call result AND immediately trigger a new response.
@@ -195,7 +186,6 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         isConnected = true
         reconnectAttempts = 0
         print("[Realtime] WebSocket connected")
-        apiLogger.logConnection(event: "WebSocket connected")
     }
 
     private func waitForSessionCreated(timeout: TimeInterval) async throws -> Bool {
@@ -242,7 +232,6 @@ class RealtimeSessionManager: NSObject, ObservableObject {
            let eventType = json["type"] as? String {
             if !eventType.contains("audio.delta") && !eventType.contains("audio_buffer") {
                 print("[Realtime] Event: \(eventType)")
-                apiLogger.logIncomingEvent(type: eventType, payloadBytes: data.count)
             }
             if eventType == "response.done",
                let response = json["response"] as? [String: Any] {
@@ -253,20 +242,10 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                     ?? (statusDetails.map { "\($0)" } ?? "none")
                 print("[Realtime] Response status: \(status), details: \(reason)")
 
-                var usage: ResponseUsage?
                 if let usageDict = response["usage"] as? [String: Any] {
-                    let inputTokens = usageDict["input_tokens"] as? Int
-                        ?? usageDict["total_tokens"] as? Int ?? 0
-                    let outputTokens = usageDict["output_tokens"] as? Int ?? 0
-                    let totalTokens = usageDict["total_tokens"] as? Int
-                        ?? (inputTokens + outputTokens)
-                    usage = ResponseUsage(
-                        inputTokens: inputTokens,
-                        outputTokens: outputTokens,
-                        totalTokens: totalTokens
-                    )
+                    let usage = ResponseUsage.from(usageDictionary: usageDict)
+                    apiLogger.logResponseDone(status: status, usage: usage)
                 }
-                apiLogger.logResponseDone(status: status, usage: usage)
             }
         }
 

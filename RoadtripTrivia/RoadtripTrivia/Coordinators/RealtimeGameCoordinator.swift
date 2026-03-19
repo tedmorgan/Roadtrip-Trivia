@@ -381,7 +381,7 @@ class RealtimeGameCoordinator: ObservableObject {
             teamName: args.teamName,
             round: currentRoundNumber,
             question: currentQuestionIndex + 1,
-            category: currentCategory.isEmpty ? (args.category ?? "") : currentCategory,
+            category: currentCategory,
             difficulty: difficulty.rawValue,
             phase: "intro"
         )

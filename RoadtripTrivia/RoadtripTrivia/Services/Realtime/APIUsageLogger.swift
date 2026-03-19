@@ -19,6 +19,15 @@ class APIUsageLogger {
         return f
     }()
 
+    // Per-session context for cost analysis
+    private var contextUserId: String?
+    private var contextTeamName: String?
+    private var contextRound: Int?
+    private var contextQuestion: Int?
+    private var contextCategory: String?
+    private var contextDifficulty: String?
+    private var contextPhase: String?   // e.g. "intro" vs "trivia"
+
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         logFileURL = docs.appendingPathComponent("api_usage.log")
@@ -41,6 +50,24 @@ class APIUsageLogger {
     var logFilePath: String { logFileURL.path }
 
     // MARK: - Logging Methods
+
+    /// Update contextual fields that will be appended to subsequent log entries.
+    /// This lets us attribute token usage to a specific user, team, round, and question.
+    func setContext(userId: String?,
+                    teamName: String?,
+                    round: Int?,
+                    question: Int?,
+                    category: String?,
+                    difficulty: String?,
+                    phase: String? = nil) {
+        contextUserId = userId
+        contextTeamName = teamName
+        contextRound = round
+        contextQuestion = question
+        contextCategory = category
+        contextDifficulty = difficulty
+        if let phase { contextPhase = phase }
+    }
 
     /// Log an outgoing API call (client → server).
     func logOutgoingEvent(type: String, payloadBytes: Int) {
@@ -82,11 +109,25 @@ class APIUsageLogger {
 
     private func writeEntry(_ message: String) {
         let timestamp = dateFormatter.string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
+        let context = contextSuffix()
+        let line = "[\(timestamp)] \(message)\(context)\n"
         guard let data = line.data(using: .utf8) else { return }
         queue.async { [weak self] in
             self?.fileHandle?.write(data)
         }
+    }
+
+    private func contextSuffix() -> String {
+        var parts: [String] = []
+        if let user = contextUserId { parts.append("user=\(user)") }
+        if let team = contextTeamName { parts.append("team=\"\(team)\"") }
+        if let round = contextRound { parts.append("round=\(round)") }
+        if let q = contextQuestion { parts.append("question=\(q)") }
+        if let cat = contextCategory { parts.append("category=\"\(cat)\"") }
+        if let diff = contextDifficulty { parts.append("difficulty=\(diff)") }
+        if let phase = contextPhase { parts.append("phase=\(phase)") }
+        guard !parts.isEmpty else { return "" }
+        return " | " + parts.joined(separator: " | ")
     }
 }
 

@@ -20,6 +20,8 @@ class RealtimeGameCoordinator: ObservableObject {
     private let audioManager = AudioSessionManager.shared
     private let locationService = LocationService.shared
     private let persistence = SessionPersistenceService.shared
+    private let connectionMonitor = ConnectionMonitor.shared
+    private let apiLogger = APIUsageLogger.shared
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Game Tracking
@@ -63,6 +65,7 @@ class RealtimeGameCoordinator: ObservableObject {
         self.stateManager = stateManager
         observeRealtimeEvents()
         observeInterruptions()
+        observeConnectionQuality()
     }
 
     deinit {
@@ -371,6 +374,18 @@ class RealtimeGameCoordinator: ObservableObject {
         stateManager.setTeamName(args.teamName)
         gameViewModel.displayTeamName = args.teamName ?? ""
 
+        // Update API usage context for cost analysis — this is still \"intro\" phase
+        let userId = AuthService.shared.currentUserID
+        apiLogger.setContext(
+            userId: userId,
+            teamName: args.teamName,
+            round: currentRoundNumber,
+            question: currentQuestionIndex + 1,
+            category: currentCategory.isEmpty ? (args.category ?? "") : currentCategory,
+            difficulty: difficulty.rawValue,
+            phase: "intro"
+        )
+
         // Bug 23: Mark that the user has played at least one game
         UserDefaults.standard.set(true, forKey: hasPlayedBeforeKey)
 
@@ -474,6 +489,20 @@ class RealtimeGameCoordinator: ObservableObject {
             isCorrect: args.isCorrect,
             wasHint: actualHint,
             wasChallenge: actualChallenge
+        )
+
+        // Refresh API usage context now that round/question may have advanced.
+        // This marks logs as \"trivia\" (actual gameplay questions), distinct from intro/setup.
+        let session = gameViewModel.currentSession
+        let userId = AuthService.shared.currentUserID
+        apiLogger.setContext(
+            userId: userId,
+            teamName: session?.teamName,
+            round: currentRoundNumber,
+            question: currentQuestionIndex + 1,
+            category: currentCategory,
+            difficulty: session?.difficulty.rawValue,
+            phase: "trivia"
         )
 
         // Transition to showingResult (previously done by update_ui)
@@ -792,6 +821,87 @@ class RealtimeGameCoordinator: ObservableObject {
                 try await sessionManager.flushPendingResults()
             } catch {
                 print("[RealtimeGame] Failed to flush pending results: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Connection Quality Monitoring
+
+    private var pausedByConnectionLoss = false
+
+    private func observeConnectionQuality() {
+        connectionMonitor.$isConnected
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] connected in
+                guard let self else { return }
+                let phase = self.gameViewModel.currentPhase
+                guard phase != .idle && phase != .gameOver else { return }
+
+                if !connected && phase != .paused {
+                    print("[RealtimeGame] Connection lost — pausing game")
+                    self.pausedByConnectionLoss = true
+                    self.pauseGame()
+                }
+
+                if connected && self.pausedByConnectionLoss && phase == .paused {
+                    print("[RealtimeGame] Connection restored — reconnecting with full context")
+                    self.pausedByConnectionLoss = false
+                    self.reconnectAfterConnectionLoss()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Reconnect After Connection Loss
+
+    private func reconnectAfterConnectionLoss() {
+        guard let session = gameViewModel.currentSession else {
+            resumeGame()
+            return
+        }
+
+        let checkpoint = SessionCheckpoint(
+            sessionID: session.id,
+            roundIndex: currentRoundNumber > 0 ? currentRoundNumber - 1 : 0,
+            questionIndex: currentQuestionIndex,
+            totalScore: totalCorrect,
+            hintsUsed: session.hintsUsed,
+            challengesUsed: session.challengesUsed,
+            currentCategory: currentCategory,
+            locationLabel: session.locationLabel,
+            lightningTimeRemaining: isLightningRound ? TimeInterval(lightningSecondsRemaining) : nil,
+            difficulty: session.difficulty,
+            playerCount: session.playerCount,
+            ageBands: session.ageBands,
+            teamName: session.teamName,
+            savedAt: Date()
+        )
+
+        let resumeContext = ResumeContext(from: checkpoint)
+        let config = SystemPromptBuilder.buildSessionConfig(
+            locationLabel: locationService.currentLocationLabel,
+            resumeContext: resumeContext,
+            questionHistory: questionHistory.isEmpty ? nil : questionHistory,
+            isFirstGame: false
+        )
+
+        Task { @MainActor in
+            do {
+                // Tear down old session and audio to prevent echo
+                audioService.stopStreaming()
+                sessionManager.disconnect()
+
+                audioManager.activateForSpeech()
+                audioService.configure(sessionManager: sessionManager)
+                try await sessionManager.connect(sessionConfig: config)
+                try audioService.startStreaming()
+                gameViewModel.transition(to: .playing)
+
+                try await sessionManager.send(.responseCreate(instructions: nil))
+                print("[RealtimeGame] Reconnected after connection loss with full game context")
+            } catch {
+                print("[RealtimeGame] Reconnect failed: \(error)")
+                gameViewModel.connectionError = "Failed to reconnect. Please restart the game."
             }
         }
     }

@@ -60,6 +60,9 @@ class AudioStreamingService: ObservableObject {
     func configure(sessionManager: RealtimeSessionManager) {
         self.sessionManager = sessionManager
 
+        // Cancel any previous subscriptions to prevent duplicate audio processing
+        cancellables.removeAll()
+
         // Listen for audio events from the Realtime API
         sessionManager.eventPublisher
             .receive(on: DispatchQueue.main)

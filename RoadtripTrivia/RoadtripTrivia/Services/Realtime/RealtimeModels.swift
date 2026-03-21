@@ -39,6 +39,15 @@ enum RealtimeClientEvent {
                     "silence_duration_ms": 800
                 ] as [String: Any]
             ]
+            // Cost experiment (feature/realtime-conversation-truncation): cap how much
+            // conversation history counts as input each turn. See docs/REALTIME_TRUNCATION_EXPERIMENT.md
+            session["truncation"] = [
+                "type": "retention_ratio",
+                "retention_ratio": 0.85,
+                "token_limits": [
+                    "post_instructions": 10_000
+                ]
+            ] as [String: Any]
             if !config.tools.isEmpty {
                 session["tools"] = config.tools.map { $0.toDictionary() }
                 session["tool_choice"] = "auto"

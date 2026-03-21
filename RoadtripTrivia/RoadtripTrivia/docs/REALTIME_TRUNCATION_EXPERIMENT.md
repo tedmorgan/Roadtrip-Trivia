@@ -23,6 +23,8 @@ Bundling truncation with the first update appeared to risk the **entire** update
 
 Tune `post_instructions` (e.g. 6000–16000) and `retention_ratio` (e.g. 0.75–0.9) in `RealtimeModels.swift` (`sessionTruncationExperiment`) and compare `api_usage.log` and game quality.
 
+**Encoding `retention_ratio`:** Use `NSDecimalNumber(string: "0.85")` (or another short decimal string), not a Swift `Double` literal. `JSONSerialization` can emit binary-float artifacts with **more than 16 decimal places**, which triggers API error `decimal_max_decimal_places_exceeded` and leaves truncation unset.
+
 ## Caveats
 
 - Truncation can affect **prompt caching** behavior; watch cache hit rates if you rely on them.

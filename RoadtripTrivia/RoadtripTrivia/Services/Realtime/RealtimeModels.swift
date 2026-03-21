@@ -51,9 +51,12 @@ enum RealtimeClientEvent {
 
         case .sessionTruncationExperiment:
             // See docs/REALTIME_TRUNCATION_EXPERIMENT.md — applied in a follow-up session.update.
+            // Use NSDecimalNumber: JSONSerialization encodes Swift Double 0.85 with >16 fractional digits
+            // (binary float), and the API returns decimal_max_decimal_places_exceeded.
+            let retentionRatio = NSDecimalNumber(string: "0.85") ?? .zero
             let truncation: [String: Any] = [
                 "type": "retention_ratio",
-                "retention_ratio": 0.85,
+                "retention_ratio": retentionRatio,
                 "token_limits": [
                     "post_instructions": 10_000
                 ]

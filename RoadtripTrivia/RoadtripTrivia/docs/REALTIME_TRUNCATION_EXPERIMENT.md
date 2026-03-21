@@ -18,17 +18,22 @@ Bundling truncation with the first update appeared to risk the **entire** update
 | Field | Value | Notes |
 |-------|-------|--------|
 | `type` | `retention_ratio` | OpenAI Realtime truncation mode |
-| `retention_ratio` | `0.85` | Fraction of context to retain when trimming |
-| `token_limits.post_instructions` | `10000` | Max tokens after instructions (per API: includes tool definitions in the “after instructions” accounting) |
+| `retention_ratio` | `0.65` | Fraction of context to retain when trimming — aggressive to reduce trim frequency |
+| `token_limits.post_instructions` | `18000` | Max tokens after instructions — higher bucket to delay first trim and preserve cache |
 
-Tune `post_instructions` (e.g. 6000–16000) and `retention_ratio` (e.g. 0.75–0.9) in `RealtimeModels.swift` (`sessionTruncationExperiment`) and compare `api_usage.log` and game quality.
+### Previous settings and results
 
-**Encoding `retention_ratio`:** Use `NSDecimalNumber(string: "0.85")` (or another short decimal string), not a Swift `Double` literal. `JSONSerialization` can emit binary-float artifacts with **more than 16 decimal places**, which triggers API error `decimal_max_decimal_places_exceeded` and leaves truncation unset.
+- **v1** (`retention_ratio: 0.85`, `post_instructions: 10000`): Truncation fired too often, busting cache on nearly every other turn. Dashboard showed higher cost than baseline despite lower per-turn input in app log.
+- **v2** (current): Bigger bucket (18k) so truncation fires later; more aggressive trim (keep 65%) so each trim buys several turns of headroom before the next one.
+
+Tune `post_instructions` and `retention_ratio` in `RealtimeModels.swift` (`sessionTruncationExperiment`) and compare `api_usage.log` and game quality.
+
+**Encoding `retention_ratio`:** Use `NSDecimalNumber(string: "0.65")` (or another short decimal string), not a Swift `Double` literal. `JSONSerialization` can emit binary-float artifacts with **more than 16 decimal places**, which triggers API error `decimal_max_decimal_places_exceeded` and leaves truncation unset.
 
 ## Caveats
 
 - Truncation can affect **prompt caching** behavior; watch cache hit rates if you rely on them.
-- Too-aggressive limits may drop earlier Q&A context; increase limits if the host “forgets” the game state.
+- Too-aggressive limits may drop earlier Q&A context; increase limits if the host "forgets" the game state.
 - Watch Xcode logs for `[Realtime] API error` after the second `session.update`; that indicates the server rejected truncation (game should still run with step 1 applied).
 
 ## Revert

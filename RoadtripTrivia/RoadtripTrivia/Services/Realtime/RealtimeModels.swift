@@ -8,6 +8,10 @@ enum RealtimeClientEvent {
     /// Update session configuration (system prompt, tools, voice, turn detection).
     case sessionUpdate(SessionConfig)
 
+    /// Cost experiment: truncation only. Sent **after** `sessionUpdate` so the server cannot reject
+    /// the whole config (instructions/tools) if truncation validation fails.
+    case sessionTruncationExperiment
+
     /// Append a chunk of base64-encoded PCM16 audio from the microphone.
     case inputAudioBufferAppend(audio: String)
 
@@ -39,20 +43,25 @@ enum RealtimeClientEvent {
                     "silence_duration_ms": 800
                 ] as [String: Any]
             ]
-            // Cost experiment (feature/realtime-conversation-truncation): cap how much
-            // conversation history counts as input each turn. See docs/REALTIME_TRUNCATION_EXPERIMENT.md
-            session["truncation"] = [
-                "type": "retention_ratio",
-                "retention_ratio": 0.85,
-                "token_limits": [
-                    "post_instructions": 10_000
-                ]
-            ] as [String: Any]
             if !config.tools.isEmpty {
                 session["tools"] = config.tools.map { $0.toDictionary() }
                 session["tool_choice"] = "auto"
             }
             return ["type": "session.update", "session": session]
+
+        case .sessionTruncationExperiment:
+            // See docs/REALTIME_TRUNCATION_EXPERIMENT.md — applied in a follow-up session.update.
+            let truncation: [String: Any] = [
+                "type": "retention_ratio",
+                "retention_ratio": 0.85,
+                "token_limits": [
+                    "post_instructions": 10_000
+                ]
+            ]
+            return [
+                "type": "session.update",
+                "session": ["truncation": truncation]
+            ]
 
         case .inputAudioBufferAppend(let audio):
             return ["type": "input_audio_buffer.append", "audio": audio]

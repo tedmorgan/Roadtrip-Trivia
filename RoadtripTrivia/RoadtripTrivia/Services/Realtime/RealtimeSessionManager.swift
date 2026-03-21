@@ -60,8 +60,15 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         // Step 2: Connect WebSocket
         try await connectWebSocket(token: token)
 
-        // Step 3: Send session configuration
+        // Step 3: Send session configuration (instructions, tools, voice, …)
         try await send(.sessionUpdate(sessionConfig))
+        // Step 3b: Truncation experiment — separate update so a truncation validation issue cannot
+        // reject the same payload as instructions/tools (symptom: generic “how can I help?” host).
+        do {
+            try await send(.sessionTruncationExperiment)
+        } catch {
+            print("[Realtime] Truncation experiment send failed — continuing without it: \(error.localizedDescription)")
+        }
 
         print("[Realtime] Session configured — ready for conversation")
     }
@@ -321,6 +328,11 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
                     if let config = self.currentSessionConfig {
                         try await self.send(.sessionUpdate(config))
+                        do {
+                            try await self.send(.sessionTruncationExperiment)
+                        } catch {
+                            print("[Realtime] Truncation experiment send failed on reconnect — continuing: \(error.localizedDescription)")
+                        }
                     }
 
                     self.isReconnecting = false

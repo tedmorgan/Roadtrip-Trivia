@@ -12,7 +12,8 @@ struct SystemPromptBuilder {
         resumeContext: ResumeContext? = nil,
         preconfiguredContext: PreConfiguredContext? = nil,
         questionHistory: [String]? = nil,
-        isFirstGame: Bool = true
+        isFirstGame: Bool = true,
+        roundsRemaining: Int? = nil
     ) -> SessionConfig {
         let difficulty: Difficulty? = preconfiguredContext?.difficulty ?? resumeContext.map {
             Difficulty(rawValue: $0.difficulty) ?? .tricky
@@ -23,7 +24,8 @@ struct SystemPromptBuilder {
             preconfiguredContext: preconfiguredContext,
             questionHistory: questionHistory,
             isFirstGame: isFirstGame,
-            chosenDifficulty: difficulty
+            chosenDifficulty: difficulty,
+            roundsRemaining: roundsRemaining
         )
         return SessionConfig(
             instructions: prompt,
@@ -38,13 +40,15 @@ struct SystemPromptBuilder {
         voice: String = "alloy",
         difficulty: Difficulty,
         questionHistory: [String]? = nil,
-        isFirstGame: Bool = false
+        isFirstGame: Bool = false,
+        roundsRemaining: Int? = nil
     ) -> SessionConfig {
         let prompt = buildPrompt(
             locationLabel: locationLabel,
             questionHistory: questionHistory,
             isFirstGame: isFirstGame,
-            chosenDifficulty: difficulty
+            chosenDifficulty: difficulty,
+            roundsRemaining: roundsRemaining
         )
         return SessionConfig(
             instructions: prompt,
@@ -61,7 +65,8 @@ struct SystemPromptBuilder {
         preconfiguredContext: PreConfiguredContext? = nil,
         questionHistory: [String]? = nil,
         isFirstGame: Bool = true,
-        chosenDifficulty: Difficulty? = nil
+        chosenDifficulty: Difficulty? = nil,
+        roundsRemaining: Int? = nil
     ) -> String {
         let location = locationLabel ?? "somewhere in the United States"
 
@@ -109,9 +114,10 @@ struct SystemPromptBuilder {
 
         MULTIPLE CHOICE (Simple and Tricky):
         - Always present exactly 4 options (A, B, C, D)
-        - CRITICAL: Rotate the correct answer position. Use each of A, B, C, D at least once \
-          per 5-question round. Place correct on C or D at least as often as A or B. \
-          Never put correct on A or B more than twice per round.
+        - CORRECT ANSWER POSITION: For each question, choose A, B, C, or D uniformly at random \
+          (true randomness per question — do not rotate in a fixed pattern across the round). \
+          Shuffle option text so the correct letter is not always the longest or "most specific" choice. \
+          Do not cluster correct answers on one letter across several questions in a row on purpose.
         - All options must be plausible. Accept letter or full answer text.
 
         MULTI-PLAYER: When 2+ players, always ask "is that your final answer?" before scoring. \
@@ -128,7 +134,9 @@ struct SystemPromptBuilder {
         LIGHTNING ROUND: After every 4 standard rounds, offer a Lightning Round. \
         2 minutes, rapid-fire, no question limit. Set isLightning=true in every report_score call. \
         Questions must match the game's difficulty level. No hints or challenges. \
-        Keep pace fast. When app says "TIME IS UP", announce the score and ask to continue.
+        Keep pace fast. When the app interrupts with TIME IS UP, stop immediately — do NOT ask another \
+        question and do NOT call report_score for another lightning question; only announce the score \
+        and move on. After lightning ends, use isLightning=false on standard-round report_score calls.
 
         VOICE COMMANDS: "hint", "challenge", "skip" (counts as wrong), "reroll" (new category, \
         max 2/round), "end game"/"stop", "pause"
@@ -139,6 +147,25 @@ struct SystemPromptBuilder {
         - get_location: before each new round
         - end_game: only when player asks to stop
         """
+
+        // Round budget awareness
+        if let remaining = roundsRemaining {
+            if remaining <= 0 {
+                prompt += """
+
+                ROUND LIMIT: The player has NO rounds remaining after this one. \
+                After this round ends, you MUST call end_game. Do NOT ask "Want to keep going?" — \
+                instead tell them they've used all their rounds and can get more from the app.
+                """
+            } else if remaining <= 2 {
+                prompt += """
+
+                ROUND LIMIT: The player has \(remaining) round\(remaining == 1 ? "" : "s") remaining \
+                after this one. After each round, let them know how many rounds they have left \
+                before asking if they want to continue.
+                """
+            }
+        }
 
         if let history = questionHistory, !history.isEmpty {
             let maxHistoryItems = 50
@@ -164,14 +191,17 @@ struct SystemPromptBuilder {
             """
         } else if let preconfig = preconfiguredContext {
             let pts = preconfig.previousTotalCorrect * preconfig.difficulty.pointsPerCorrect
+            let nextRound = preconfig.previousRoundCount + 1
             prompt += """
 
-            PRE-CONFIGURED: Difficulty=\(preconfig.difficulty.rawValue), \
+            PRE-CONFIGURED (continuing a previous game): Difficulty=\(preconfig.difficulty.rawValue), \
             \(preconfig.playerCount) players, team=\(preconfig.teamName ?? "Team"), \
             ages=\(preconfig.ageBands.map { $0.rawValue }.joined(separator: ", ")), \
             previous score=\(pts) pts from \(preconfig.previousRoundCount) rounds. \
             Call set_game_config immediately. Skip setup/rules. \
-            Greet by name, mention previous score, start Round 1.
+            Greet by team name, acknowledge their previous score (\(pts) pts), \
+            and start Round \(nextRound) (use roundNumber=\(nextRound) in report_score). \
+            Do NOT start at Round 1 — they are continuing where they left off.
             """
         } else {
             let rulesNote = isFirstGame
@@ -201,14 +231,14 @@ struct SystemPromptBuilder {
         case .simple:
             return """
             SIMPLE: Multiple choice (A/B/C/D). Lenient grading — close enough counts. \
-            Accessible to all ages. Follow randomization rules above.
+            Accessible to all ages. Randomize which letter (A–D) is correct each question as above.
             """
 
         case .tricky:
             return """
             TRICKY: Multiple choice (A/B/C/D). Include wordplay/misdirection. \
             Moderate grading — accept reasonable variations and speech recognition artifacts. \
-            Follow randomization rules above.
+            Randomize which letter (A–D) is correct each question as above.
             """
 
         case .hard:

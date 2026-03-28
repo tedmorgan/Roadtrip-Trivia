@@ -79,13 +79,20 @@ class CarPlayCoordinator: NSObject {
             return CPListTemplate(title: "Roadtrip Trivia", sections: [section])
         }
 
-        // Start New Game — always visible
+        // Start New Game — show round balance in detail text
+        let roundLabel = RoundTracker.shared.shortLabel
+        let canPlay = RoundTracker.shared.canPlayRound
         let startItem = CPListItem(
-            text: "Start New Game",
-            detailText: "Voice-guided trivia powered by AI"
+            text: canPlay ? "Start New Game" : "Get More Rounds",
+            detailText: canPlay ? roundLabel : "Open Roadtrip Trivia on iPhone to purchase rounds"
         )
         startItem.handler = { [weak self] _, completion in
-            self?.startNewGame()
+            if RoundTracker.shared.canPlayRound {
+                self?.startNewGame()
+            } else {
+                // Post notification to show paywall on iPhone
+                NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            }
             completion()
         }
         mainItems.append(startItem)
@@ -348,7 +355,9 @@ class CarPlayCoordinator: NSObject {
 
     // MARK: - Disconnect
 
-    func handleDisconnect() {
+    /// - Parameter refreshHome: When true (default), rebuilds the root home template so Recent Games reflects
+    ///   `saveCompletedSession`. Set false when CarPlay is disconnecting and the UI is being torn down.
+    func handleDisconnect(refreshHome: Bool = true) {
         refreshWorkItem?.cancel()
         refreshWorkItem = nil
 
@@ -357,12 +366,24 @@ class CarPlayCoordinator: NSObject {
             persistenceService.saveCompletedSession(session)
         }
 
+        // Daily/monthly leaderboards: short games never call `end_game`; sync score when returning to menu.
+        realtimeCoordinator?.submitLeaderboardFromCurrentSessionIfEligible()
+
         realtimeCoordinator?.disconnect()
         realtimeCoordinator = nil
         playingTemplate = nil
         stateManager?.onNeedsRefresh = nil
         stateManager?.reset()
         stateManager = nil
+
+        // Bug (Recent Games): Same as returnToHome — persist alone does not update the root list; rebuild root.
+        if refreshHome {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                let freshHome = self.buildHomeTemplate()
+                self.interfaceController.setRootTemplate(freshHome, animated: false, completion: nil)
+            }
+        }
     }
 }
 

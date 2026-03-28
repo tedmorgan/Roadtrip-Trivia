@@ -27,7 +27,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
         print("[CarPlaySceneDelegate] CarPlay disconnected")
-        carPlayCoordinator?.handleDisconnect()
+        carPlayCoordinator?.handleDisconnect(refreshHome: false)
         carPlayCoordinator = nil
         self.interfaceController = nil
         tearDownRemoteCommandCenter()

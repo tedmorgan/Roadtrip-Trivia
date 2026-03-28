@@ -70,6 +70,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         print("[AppDelegate] App launched")
         AudioSessionManager.shared.configureForCarPlay()
         ConnectionMonitor.shared.start()
+
+        // Initialize StoreKit 2 transaction listener early so purchases
+        // made outside the app (renewals, Ask-to-Buy) are processed.
+        Task { @MainActor in
+            _ = StoreService.shared
+        }
+
         return true
     }
 

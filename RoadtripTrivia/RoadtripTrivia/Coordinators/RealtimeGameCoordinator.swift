@@ -1,6 +1,18 @@
 import Foundation
 import Combine
 
+// #region agent log helper
+private let _debugLogPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first! + "/debug-f3b222.log"
+private func _dbg(_ hyp: String, _ loc: String, _ msg: String, _ data: [String: Any]) {
+    let entry: [String: Any] = ["sessionId":"f3b222","hypothesisId":hyp,"location":loc,"message":msg,"data":data,"timestamp":Date().timeIntervalSince1970*1000]
+    guard let d = try? JSONSerialization.data(withJSONObject: entry), let line = String(data: d, encoding: .utf8) else { return }
+    print("[DBG-f3b222] \(hyp) | \(msg) | \(data)")
+    if !FileManager.default.fileExists(atPath: _debugLogPath) { FileManager.default.createFile(atPath: _debugLogPath, contents: nil) }
+    guard let h = FileHandle(forWritingAtPath: _debugLogPath) else { return }
+    h.seekToEndOfFile(); h.write((line+"\n").data(using: .utf8)!); h.closeFile()
+}
+// #endregion
+
 /// Orchestrates a Realtime API-powered trivia game.
 ///
 /// Unlike the old GameFlowCoordinator (26-phase state machine), this coordinator
@@ -34,6 +46,7 @@ class RealtimeGameCoordinator: ObservableObject {
     private var currentCategory = ""
     private var roundCorrect = 0
     private var roundAnswered = 0
+    private var hasSubmittedLeaderboard = false
 
     // Lightning round timer
     private var lightningTimer: Timer?
@@ -43,6 +56,10 @@ class RealtimeGameCoordinator: ObservableObject {
     private var lightningSecondsRemaining = 120
     private var lightningEndCutoffWork: DispatchWorkItem?
     private var lightningAnnouncedButNotStarted = false
+    /// Merged into the next `flushPendingResults` `response.create` (avoids duplicate create vs. `response.cancel`).
+    private var pendingLightningFlushInstructions: String?
+    /// After the 2:00 timer hits zero, block `startLightningTimer` from the B1 path so wrap-up `report_score(isLightning:true)` cannot restart a new lightning round.
+    private var suppressLightningToolCallRestart = false
 
     // Per-round hint/challenge limits (Bug 20)
     private var roundHintsUsed = 0
@@ -75,6 +92,19 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Start New Game
 
     func startNewGame() {
+        // Check round budget BEFORE connecting to OpenAI (saves API costs)
+        guard RoundTracker.shared.canPlayRound else {
+            print("[RealtimeGame] No rounds available — showing paywall")
+            NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            return
+        }
+
+        // Consume the first round upfront
+        guard RoundTracker.shared.consumeOneRound() else {
+            NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            return
+        }
+
         gameViewModel.transition(to: .connecting)
         gameViewModel.resetDisplayProperties()
 
@@ -88,17 +118,18 @@ class RealtimeGameCoordinator: ObservableObject {
         let config = SystemPromptBuilder.buildSessionConfig(
             locationLabel: locationService.currentLocationLabel,
             questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: isFirstGame
+            isFirstGame: isFirstGame,
+            roundsRemaining: RoundTracker.shared.totalRoundsAvailable
         )
 
         Task { @MainActor in
             do {
                 audioService.configure(sessionManager: sessionManager)
+                sessionManager.autoReconnectDisabled = true
                 try await sessionManager.connect(sessionConfig: config)
                 try audioService.startStreaming()
                 gameViewModel.transition(to: .playing)
 
-                // Kick off the conversation
                 try await sessionManager.send(.responseCreate(instructions: nil))
                 print("[RealtimeGame] Game started")
             } catch {
@@ -112,6 +143,17 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Resume Game
 
     func resumeGame(from checkpoint: SessionCheckpoint) {
+        // Check round budget — resuming still costs a round for the current round
+        guard RoundTracker.shared.canPlayRound else {
+            print("[RealtimeGame] No rounds available — showing paywall")
+            NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            return
+        }
+        guard RoundTracker.shared.consumeOneRound() else {
+            NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            return
+        }
+
         gameViewModel.transition(to: .connecting)
         gameViewModel.resetDisplayProperties()
         gameViewModel.restoreFromCheckpoint(checkpoint)
@@ -143,12 +185,14 @@ class RealtimeGameCoordinator: ObservableObject {
             locationLabel: checkpoint.locationLabel,
             resumeContext: resumeContext,
             questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: false
+            isFirstGame: false,
+            roundsRemaining: RoundTracker.shared.totalRoundsAvailable
         )
 
         Task { @MainActor in
             do {
                 audioService.configure(sessionManager: sessionManager)
+                sessionManager.autoReconnectDisabled = true
                 try await sessionManager.connect(sessionConfig: config)
                 try audioService.startStreaming()
                 gameViewModel.transition(to: .playing)
@@ -173,6 +217,17 @@ class RealtimeGameCoordinator: ObservableObject {
         previousTotalCorrect: Int = 0,
         previousRoundCount: Int = 0
     ) {
+        // Check round budget before connecting
+        guard RoundTracker.shared.canPlayRound else {
+            print("[RealtimeGame] No rounds available — showing paywall")
+            NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            return
+        }
+        guard RoundTracker.shared.consumeOneRound() else {
+            NotificationCenter.default.post(name: RoundTracker.showPaywallNotification, object: nil)
+            return
+        }
+
         gameViewModel.transition(to: .connecting)
         gameViewModel.resetDisplayProperties()
         gameViewModel.createSession(
@@ -183,11 +238,11 @@ class RealtimeGameCoordinator: ObservableObject {
         )
 
         stateManager.setTeamName(teamName)
-        // Bug 36: Show team name and previous score on iPhone display immediately for replayed games
         gameViewModel.displayTeamName = teamName ?? ""
         if previousTotalCorrect > 0 {
             totalCorrect = previousTotalCorrect
             gameViewModel.displayTotalCorrect = previousTotalCorrect
+            currentRoundNumber = previousRoundCount
             gameViewModel.displayRoundNumber = previousRoundCount + 1
         }
         loadQuestionHistory()
@@ -206,12 +261,14 @@ class RealtimeGameCoordinator: ObservableObject {
             locationLabel: locationService.currentLocationLabel,
             preconfiguredContext: preconfig,
             questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: false
+            isFirstGame: false,
+            roundsRemaining: RoundTracker.shared.totalRoundsAvailable
         )
 
         Task { @MainActor in
             do {
                 audioService.configure(sessionManager: sessionManager)
+                sessionManager.autoReconnectDisabled = true
                 try await sessionManager.connect(sessionConfig: config)
                 try audioService.startStreaming()
                 gameViewModel.transition(to: .playing)
@@ -229,10 +286,12 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Disconnect
 
     func disconnect() {
-        lightningTimer?.invalidate()
-        lightningTimer = nil
-        lightningEndCutoffWork?.cancel()
-        lightningEndCutoffWork = nil
+        stopLightningTimer()
+        pendingLightningFlushInstructions = nil
+        suppressLightningToolCallRestart = false
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
+        pausedByConnectionLoss = false
         cancellables.removeAll()          // Bug 29/31: prevent duplicate subscriptions on resume
         audioService.stopStreaming()
         sessionManager.disconnect()
@@ -249,11 +308,31 @@ class RealtimeGameCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Observe connection state
+        // Observe WebSocket connection state — triggers coordinator-managed reconnect
         sessionManager.$isConnected
             .receive(on: DispatchQueue.main)
             .sink { [weak self] connected in
-                self?.gameViewModel.isConnected = connected
+                guard let self else { return }
+                self.gameViewModel.isConnected = connected
+
+                let phase = self.gameViewModel.currentPhase
+                guard phase != .idle && phase != .gameOver && phase != .connecting else { return }
+
+                if !connected && !self.pausedByConnectionLoss && phase != .paused {
+                    // WebSocket dropped while game is active — pause and schedule context-aware reconnect.
+                    // NWPathMonitor may still show .satisfied on degraded cellular, so we handle it here.
+                    print("[RealtimeGame] WebSocket disconnected during gameplay — pausing for reconnect")
+                    // #region agent log
+                    _dbg("E1","RealtimeGameCoordinator.swift:ws_drop","WebSocket isConnected→false during gameplay",["phase":"\(phase)","round":self.currentRoundNumber,"question":self.currentQuestionIndex])
+                    // #endregion
+                    self.pausedByConnectionLoss = true
+                    self.lightningTimer?.invalidate()
+                    self.lightningTimer = nil
+                    self.audioService.stopStreaming()
+                    self.gameViewModel.transition(to: .paused)
+                    self.connectionMonitor.speakOffline("Hold on, we lost the connection. Reconnecting now.")
+                    self.scheduleReconnect()
+                }
             }
             .store(in: &cancellables)
     }
@@ -282,12 +361,16 @@ class RealtimeGameCoordinator: ObservableObject {
             }
 
         case .responseAudioTranscriptDone(let text):
-            // Detect lightning round announcement from transcript
+            // Detect lightning round *start* from transcript (not wrap-up: "total up your lightning round score").
             if !isLightningRound && !lightningAnnouncedButNotStarted
-                && text.lowercased().contains("lightning round") {
+                && Self.transcriptSuggestsStartingLightningRound(text) {
                 lightningAnnouncedButNotStarted = true
+                suppressLightningToolCallRestart = false
                 gameViewModel.lightningSecondsRemaining = 120
                 print("[RealtimeGame] Lightning round detected from transcript")
+                // #region agent log
+                _dbg("A1","RealtimeGameCoordinator.swift:298","TRANSCRIPT set announced=true + UI shows 2:00",["transcript":String(text.prefix(200)),"isLightningRound":self.isLightningRound,"secs":self.lightningSecondsRemaining])
+                // #endregion
             }
 
         case .error(let message, let code):
@@ -396,7 +479,8 @@ class RealtimeGameCoordinator: ObservableObject {
             locationLabel: locationService.currentLocationLabel,
             difficulty: difficulty,
             questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: isFirstGameSession
+            isFirstGame: isFirstGameSession,
+            roundsRemaining: RoundTracker.shared.totalRoundsAvailable
         )
         Task {
             try? await sessionManager.send(.sessionUpdate(trimmedConfig))
@@ -419,13 +503,30 @@ class RealtimeGameCoordinator: ObservableObject {
 
         // Lightning round detection from isLightning field
         let reportedLightning = args.isLightning ?? false
-        if reportedLightning && !isLightningRound && !lightningAnnouncedButNotStarted {
+        // #region agent log
+        _dbg("B1_B2_C2","RealtimeGameCoordinator.swift:435","report_score lightning check",["reportedLightning":reportedLightning,"isLightningRound":self.isLightningRound,"announced":self.lightningAnnouncedButNotStarted,"argsIsLightning":String(describing:args.isLightning),"roundNumber":String(describing:args.roundNumber),"questionIndex":args.questionIndex,"category":args.category ?? "nil","secs":self.lightningSecondsRemaining])
+        // #endregion
+        if args.isLightning == false {
+            suppressLightningToolCallRestart = false
+        }
+
+        if reportedLightning && !isLightningRound && !lightningAnnouncedButNotStarted && !suppressLightningToolCallRestart {
             lightningAnnouncedButNotStarted = false
             startLightningTimer()
+            // #region agent log
+            _dbg("B1","RealtimeGameCoordinator.swift:442","startLightningTimer from isLightning=true (no prior announcement)",["roundNumber":String(describing:args.roundNumber)])
+            // #endregion
         } else if reportedLightning && lightningAnnouncedButNotStarted {
             lightningAnnouncedButNotStarted = false
             startLightningTimer()
-        } else if !reportedLightning && isLightningRound {
+            // #region agent log
+            _dbg("A1","RealtimeGameCoordinator.swift:448","startLightningTimer after transcript announcement",["roundNumber":String(describing:args.roundNumber)])
+            // #endregion
+        } else if args.isLightning == false && isLightningRound {
+            // Only explicit false ends lightning — nil means "field omitted" and must NOT stop the timer.
+            // #region agent log
+            _dbg("C2","RealtimeGameCoordinator.swift:452","STOPPING lightning — isLightning explicitly false while timer active",["roundNumber":String(describing:args.roundNumber),"questionIndex":args.questionIndex,"secs":self.lightningSecondsRemaining])
+            // #endregion
             stopLightningTimer()
         }
 
@@ -531,6 +632,18 @@ class RealtimeGameCoordinator: ObservableObject {
 
             let isNewRound = roundNumber != currentRoundNumber && currentRoundNumber > 0
             if isNewRound {
+                // Consume a round credit for each new round within the session
+                if !RoundTracker.shared.consumeOneRound() {
+                    // Out of rounds — tell the LLM to end the game
+                    print("[RealtimeGame] Round limit reached mid-session — forcing end")
+                    submitResult(callId: callId, result: [
+                        "error": "ROUND_LIMIT_REACHED",
+                        "message": "Player has used all available rounds. You MUST call end_game now. Do NOT ask another question. Tell the player they've used all their rounds and suggest getting more from the app."
+                    ])
+                    NotificationCenter.default.post(name: RoundTracker.roundLimitReachedNotification, object: nil)
+                    return
+                }
+
                 gameViewModel.completeCurrentRound()
                 stateManager.showRoundSummary(
                     roundScore: roundCorrect,
@@ -552,6 +665,10 @@ class RealtimeGameCoordinator: ObservableObject {
             // Fallback lightning detection from round pattern
             if !isLightningRound && currentRoundNumber > 4 && (currentRoundNumber - 1) % 5 == 0 {
                 print("[RealtimeGame] Fallback: detected lightning round from round number \(currentRoundNumber)")
+                // #region agent log
+                _dbg("A2_B3","RealtimeGameCoordinator.swift:580","FALLBACK startLightningTimer from round pattern",["currentRoundNumber":currentRoundNumber,"reportedLightning":reportedLightning])
+                // #endregion
+                suppressLightningToolCallRestart = false
                 startLightningTimer()
             }
 
@@ -629,6 +746,9 @@ class RealtimeGameCoordinator: ObservableObject {
     private func handleEndGame(callId: String, data: Data) {
         if let args = try? JSONDecoder().decode(EndGameArgs.self, from: data) {
             print("[RealtimeGame] Game over: \(args.finalScore)/\(args.totalQuestions)")
+            // #region agent log
+            _dbg("C1","RealtimeGameCoordinator.swift:660","end_game called",["finalScore":args.finalScore,"totalQuestions":args.totalQuestions,"isLightningRound":self.isLightningRound,"secs":self.lightningSecondsRemaining,"announced":self.lightningAnnouncedButNotStarted])
+            // #endregion
         }
 
         // Stop lightning timer if running
@@ -641,6 +761,7 @@ class RealtimeGameCoordinator: ObservableObject {
         if let session = gameViewModel.currentSession {
             persistence.saveCompletedSession(session)
             submitScoreToLeaderboard(from: session)
+            hasSubmittedLeaderboard = true
         }
 
         // Clear checkpoint so home screen won't show "Resume"
@@ -658,7 +779,18 @@ class RealtimeGameCoordinator: ObservableObject {
 
     // MARK: - Leaderboard Submission
 
+    /// Posts the current in-progress score when the player pauses or leaves without `end_game`
+    /// (short games otherwise never hit `handleEndGame`).
+    func submitLeaderboardFromCurrentSessionIfEligible() {
+        guard !hasSubmittedLeaderboard else { return }
+        guard let session = gameViewModel.currentSession else { return }
+        hasSubmittedLeaderboard = true
+        submitScoreToLeaderboard(from: session)
+    }
+
     private func submitScoreToLeaderboard(from session: TriviaSession) {
+        guard session.totalQuestionsAnswered > 0 else { return }
+
         let teamName = session.teamName ?? "Roadtrip Team"
         let points = session.totalQuestionsCorrect * session.difficulty.pointsPerCorrect
 
@@ -683,6 +815,7 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Lightning Round Timer (LTNG-08, CP-SCORE-06)
 
     private func startLightningTimer() {
+        suppressLightningToolCallRestart = false
         isLightningRound = true
         lightningSecondsRemaining = 120
         // Bug 21: Reset dedicated lightning counters
@@ -710,36 +843,29 @@ class RealtimeGameCoordinator: ObservableObject {
                 self.lightningTimer?.invalidate()
                 self.lightningTimer = nil
 
-                // Bug 19: Interrupt anything the LLM is currently saying, then tell it time is up
-                Task {
-                    // Cancel any in-progress response so the "TIME IS UP" message takes priority
-                    try? await self.sessionManager.send(.responseCancel)
-                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s pause
-                    try? await self.sessionManager.send(.responseCreate(
-                        instructions: "STOP! TIME IS UP! The lightning round is OVER. Score: \(self.lightningCorrect) correct out of \(self.lightningAnswered). Do NOT ask another question. Announce the final lightning score and ask if they want to keep playing the NEXT round."
-                    ))
-                }
+                // End lightning state immediately so in-flight report_score cannot count as lightning (logs: Q at secs 0).
+                let correct = self.lightningCorrect
+                let answered = self.lightningAnswered
+                self.pendingLightningFlushInstructions = "STOP! TIME IS UP! The lightning round is OVER. Score: \(correct) correct out of \(answered). Do NOT ask another question. Do NOT call report_score with isLightning=true for another question. Immediately announce the lightning score and transition to the next standard round or ask if they want to continue."
+                self.suppressLightningToolCallRestart = true
+                // #region agent log
+                _dbg("D1","RealtimeGameCoordinator.swift:timer0","lightning timer zero — stopLightningTimer + merge TIME IS UP into next flush",["correct":correct,"answered":answered])
+                // #endregion
+                self.stopLightningTimer()
 
-                // Bug 19: Hard cutoff — if LLM hasn't moved on within 10s, force stop lightning
-                let cutoff = DispatchWorkItem { [weak self] in
-                    guard let self, self.isLightningRound else { return }
-                    print("[RealtimeGame] Force-ending lightning round (10s cutoff)")
-                    self.stopLightningTimer()
-                    // Send one more nudge
-                    Task {
-                        try? await self.sessionManager.send(.responseCreate(
-                            instructions: "Lightning round is over. Move to the next standard round now."
-                        ))
-                    }
+                // Cancel in-flight speech; TIME IS UP is delivered via ONE response.create merged in flushPendingResults (avoids conversation_already_has_active_response).
+                Task {
+                    try? await self.sessionManager.send(.responseCancel)
                 }
-                self.lightningEndCutoffWork = cutoff
-                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: cutoff)
             }
         }
         print("[RealtimeGame] Lightning round started — 120s timer")
     }
 
     private func stopLightningTimer() {
+        // #region agent log
+        _dbg("C1_C2","RealtimeGameCoordinator.swift:783","stopLightningTimer called",["secs":self.lightningSecondsRemaining,"isLightningRound":self.isLightningRound])
+        // #endregion
         lightningTimer?.invalidate()
         lightningTimer = nil
         lightningEndCutoffWork?.cancel()
@@ -793,9 +919,18 @@ class RealtimeGameCoordinator: ObservableObject {
     /// API immediately, but response.create is deferred until responseDone fires,
     /// collapsing multiple function calls per turn into a single response cycle.
     private func submitResult(callId: String, result: [String: Any]) {
-        Task {
+        // MainActor: after lightning TIME IS UP, merge instructions with tool output in one response.create
+        // (response.done often fires before this queue completes — see flushPendingResults defer path).
+        Task { @MainActor in
             do {
                 try await sessionManager.queueFunctionResult(callId: callId, result: result)
+                if let wrap = pendingLightningFlushInstructions, sessionManager.hasPendingResults {
+                    pendingLightningFlushInstructions = nil
+                    // #region agent log
+                    _dbg("D1","RealtimeGameCoordinator.swift:submitResult","post-queue flush TIME IS UP + tool result",[:])
+                    // #endregion
+                    try await sessionManager.flushPendingResults(instructions: wrap)
+                }
             } catch {
                 print("[RealtimeGame] Failed to submit function result: \(error)")
             }
@@ -816,11 +951,52 @@ class RealtimeGameCoordinator: ObservableObject {
 
     /// Flush any pending batched results when the LLM finishes a response turn.
     private func flushPendingResults() {
-        Task {
+        Task { @MainActor in
             do {
-                try await sessionManager.flushPendingResults()
+                let merge = pendingLightningFlushInstructions
+                let hasP = sessionManager.hasPendingResults
+
+                if let wrap = merge, hasP {
+                    // Tool results already queued for this turn — single create with TIME IS UP.
+                    pendingLightningFlushInstructions = nil
+                    // #region agent log
+                    _dbg("D1","RealtimeGameCoordinator.swift:flush","flush TIME IS UP + pending tool results (response.done)",[:])
+                    // #endregion
+                    try await sessionManager.flushPendingResults(instructions: wrap)
+                    return
+                }
+
+                if merge != nil, !hasP {
+                    // `report_score` may still be queueing after response.cancel; submitResult will flush, or idle path below.
+                    // #region agent log
+                    _dbg("D1","RealtimeGameCoordinator.swift:flush","defer TIME IS UP — no pending tool results yet",[:])
+                    // #endregion
+                    scheduleDeferredIdleLightningWrapUp()
+                }
+
+                try await sessionManager.flushPendingResults(instructions: nil)
             } catch {
                 print("[RealtimeGame] Failed to flush pending results: \(error)")
+            }
+        }
+    }
+
+    /// If no `report_score` queues after cancel, still deliver TIME IS UP (nested main async ≈ later run-loop turns).
+    private func scheduleDeferredIdleLightningWrapUp() {
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    Task { @MainActor in
+                        guard let wrap = self.pendingLightningFlushInstructions else { return }
+                        guard !self.sessionManager.hasPendingResults else { return }
+                        self.pendingLightningFlushInstructions = nil
+                        // #region agent log
+                        _dbg("D1","RealtimeGameCoordinator.swift:idleWrap","idle TIME IS UP flush (no tool queue)",[:])
+                        // #endregion
+                        try? await self.sessionManager.flushPendingResults(instructions: wrap)
+                    }
+                }
             }
         }
     }
@@ -828,6 +1004,7 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Connection Quality Monitoring
 
     private var pausedByConnectionLoss = false
+    private var reconnectWorkItem: DispatchWorkItem?
 
     private func observeConnectionQuality() {
         connectionMonitor.$isConnected
@@ -838,18 +1015,39 @@ class RealtimeGameCoordinator: ObservableObject {
                 guard phase != .idle && phase != .gameOver else { return }
 
                 if !connected && phase != .paused {
-                    print("[RealtimeGame] Connection lost — pausing game")
+                    print("[RealtimeGame] Network path lost — pausing game")
                     self.pausedByConnectionLoss = true
                     self.pauseGame()
                 }
 
-                if connected && self.pausedByConnectionLoss && phase == .paused {
-                    print("[RealtimeGame] Connection restored — reconnecting with full context")
-                    self.pausedByConnectionLoss = false
-                    self.reconnectAfterConnectionLoss()
+                // Network restored — trigger reconnect if we're paused by connection loss
+                if connected && self.pausedByConnectionLoss {
+                    print("[RealtimeGame] Network path restored — scheduling reconnect with full context")
+                    self.scheduleReconnect()
                 }
             }
             .store(in: &cancellables)
+    }
+
+    /// Schedule a reconnection attempt. Coalesces multiple triggers (NWPath restored + WebSocket drop).
+    private func scheduleReconnect() {
+        reconnectWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.pausedByConnectionLoss else { return }
+            // Only reconnect if network path is available
+            guard self.connectionMonitor.isConnected else {
+                print("[RealtimeGame] Reconnect deferred — network path still down")
+                return
+            }
+            print("[RealtimeGame] Reconnecting with full game context")
+            // #region agent log
+            _dbg("E2","RealtimeGameCoordinator.swift:reconnect","scheduleReconnect firing",["round":self.currentRoundNumber,"question":self.currentQuestionIndex,"score":self.totalCorrect])
+            // #endregion
+            self.pausedByConnectionLoss = false
+            self.reconnectAfterConnectionLoss()
+        }
+        reconnectWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
     }
 
     // MARK: - Reconnect After Connection Loss
@@ -882,26 +1080,33 @@ class RealtimeGameCoordinator: ObservableObject {
             locationLabel: locationService.currentLocationLabel,
             resumeContext: resumeContext,
             questionHistory: questionHistory.isEmpty ? nil : questionHistory,
-            isFirstGame: false
+            isFirstGame: false,
+            roundsRemaining: RoundTracker.shared.totalRoundsAvailable
         )
 
         Task { @MainActor in
             do {
-                // Tear down old session and audio to prevent echo
                 audioService.stopStreaming()
                 sessionManager.disconnect()
 
                 audioManager.activateForSpeech()
                 audioService.configure(sessionManager: sessionManager)
+                sessionManager.autoReconnectDisabled = true
                 try await sessionManager.connect(sessionConfig: config)
                 try audioService.startStreaming()
                 gameViewModel.transition(to: .playing)
 
+                // Resume lightning timer if we were in a lightning round
+                if isLightningRound {
+                    resumeLightningTimer()
+                }
+
                 try await sessionManager.send(.responseCreate(instructions: nil))
-                print("[RealtimeGame] Reconnected after connection loss with full game context")
+                print("[RealtimeGame] Reconnected after connection loss with full game context (round \(self.currentRoundNumber), score \(self.totalCorrect))")
             } catch {
                 print("[RealtimeGame] Reconnect failed: \(error)")
                 gameViewModel.connectionError = "Failed to reconnect. Please restart the game."
+                gameViewModel.transition(to: .paused)
             }
         }
     }
@@ -918,6 +1123,7 @@ class RealtimeGameCoordinator: ObservableObject {
         }
 
         audioService.stopStreaming()
+        submitLeaderboardFromCurrentSessionIfEligible()
         gameViewModel.transition(to: .paused)
         gameViewModel.connectionError = "Connection lost. Your game has been saved."
     }
@@ -935,6 +1141,7 @@ class RealtimeGameCoordinator: ObservableObject {
         lightningTimer?.invalidate()
         lightningTimer = nil
         audioService.stopStreaming()
+        submitLeaderboardFromCurrentSessionIfEligible()
         gameViewModel.transition(to: .paused)
     }
 
@@ -972,6 +1179,7 @@ class RealtimeGameCoordinator: ObservableObject {
             self.lightningTimer?.invalidate()
             self.lightningTimer = nil
             self.audioService.stopStreaming()
+            self.submitLeaderboardFromCurrentSessionIfEligible()
             self.gameViewModel.transition(to: .paused)
         }
 
@@ -1025,22 +1233,43 @@ class RealtimeGameCoordinator: ObservableObject {
             if self.lightningSecondsRemaining <= 0 {
                 self.lightningTimer?.invalidate()
                 self.lightningTimer = nil
+                let correct = self.lightningCorrect
+                let answered = self.lightningAnswered
+                self.pendingLightningFlushInstructions = "STOP! TIME IS UP! The lightning round is OVER. Score: \(correct) correct out of \(answered). Do NOT ask another question. Do NOT call report_score with isLightning=true for another question. Immediately announce the lightning score and transition to the next standard round or ask if they want to continue."
+                self.suppressLightningToolCallRestart = true
+                self.stopLightningTimer()
                 Task {
                     try? await self.sessionManager.send(.responseCancel)
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    try? await self.sessionManager.send(.responseCreate(
-                        instructions: "STOP! TIME IS UP! Lightning score: \(self.lightningCorrect)/\(self.lightningAnswered). Announce the score and ask if they want to keep playing."
-                    ))
                 }
-
-                let cutoff = DispatchWorkItem { [weak self] in
-                    guard let self, self.isLightningRound else { return }
-                    self.stopLightningTimer()
-                }
-                self.lightningEndCutoffWork = cutoff
-                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: cutoff)
             }
         }
         print("[RealtimeGame] Lightning timer resumed with \(lightningSecondsRemaining)s remaining")
+    }
+
+    /// True when the host is *starting* lightning, not recapping scores (avoids false "announced" UI).
+    private static func transcriptSuggestsStartingLightningRound(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        guard lower.contains("lightning") else { return false }
+        // Wrap-up / recap (do not re-arm the 2:00 UI)
+        if lower.contains("total up") { return false }
+        if lower.contains("score now") && lower.contains("lightning") { return false }
+        if lower.contains("tally") && lower.contains("score") { return false }
+        if lower.contains("totaling") || lower.contains("totalling") { return false }
+        if lower.contains("that was") && lower.contains("lightning") { return false }
+        if lower.contains("amazing job") && lower.contains("lightning") { return false }
+        if lower.contains("great job") && lower.contains("lightning") { return false }
+
+        if lower.contains("lightning round") { return true }
+
+        let startPhrases = [
+            "jumping", "into the lightning", "into a lightning",
+            "start the lightning", "begin the lightning", "starting the lightning",
+            "here's the lightning", "here is the lightning", "here’s the lightning",
+            "time for a lightning", "time for the lightning",
+            "going into a lightning", "going into the lightning",
+            "let's do a lightning", "lets do a lightning",
+            "you're jumping", "you are jumping"
+        ]
+        return startPhrases.contains { lower.contains($0) }
     }
 }

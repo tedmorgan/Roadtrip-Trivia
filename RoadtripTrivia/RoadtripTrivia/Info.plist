@@ -24,6 +24,9 @@
 	<string></string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- App Store export compliance: app does not implement proprietary/non-standard encryption (only HTTPS/OS crypto). Skips repeated encryption questionnaire in App Store Connect. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Roadtrip Trivia uses your location to generate trivia questions about the area you are driving through.</string>
 	<key>NSMicrophoneUsageDescription</key>

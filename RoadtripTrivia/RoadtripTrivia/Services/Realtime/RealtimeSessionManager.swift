@@ -33,6 +33,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     private var intentionalDisconnect = false
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 3
+    /// When true, the session manager does NOT auto-reconnect on WebSocket drop.
+    /// The coordinator manages reconnection with full game context instead.
+    var autoReconnectDisabled = false
 
     private let apiLogger = APIUsageLogger.shared
 
@@ -121,10 +124,12 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     }
 
     /// Send a single response.create to resume the LLM after all queued results.
-    func flushPendingResults() async throws {
-        guard hasPendingResults else { return }
-        hasPendingResults = false
-        try await send(.responseCreate(instructions: nil))
+    /// If `instructions` is set (e.g. lightning TIME IS UP), attach them to this single create so we never double-call `response.create` after `response.cancel`.
+    func flushPendingResults(instructions: String? = nil) async throws {
+        let hadPending = hasPendingResults
+        if hadPending { hasPendingResults = false }
+        guard hadPending || instructions != nil else { return }
+        try await send(.responseCreate(instructions: instructions))
     }
 
     private(set) var hasPendingResults = false
@@ -282,6 +287,17 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             return
         }
 
+        // When auto-reconnect is disabled, the game coordinator handles reconnection
+        // with full game context (round, score, category, etc.)
+        if autoReconnectDisabled {
+            print("[Realtime] Auto-reconnect disabled — coordinator will handle reconnection (source: \(source))")
+            isReceiving = false
+            webSocketTask?.cancel(with: .goingAway, reason: nil)
+            webSocketTask = nil
+            eventPublisher.send(.error(message: "WebSocket disconnected", code: "websocket_disconnected"))
+            return
+        }
+
         // Prevent parallel reconnect chains: only one source gets to reconnect
         guard !isReconnecting else {
             print("[Realtime] Already reconnecting — ignoring duplicate disconnect (source: \(source))")
@@ -291,7 +307,6 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         guard reconnectAttempts < maxReconnectAttempts else {
             print("[Realtime] Max reconnect attempts (\(maxReconnectAttempts)) reached — giving up")
             connectionError = "Connection lost. Please try again."
-            // Bug 29: Clean up completely so the app isn't stuck in a broken state
             isReconnecting = false
             webSocketTask = nil
             eventPublisher.send(.error(message: "Connection lost after \(maxReconnectAttempts) retries", code: "reconnect_failed"))
@@ -300,10 +315,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
         isReconnecting = true
         reconnectAttempts += 1
-        let delay = min(pow(2.0, Double(reconnectAttempts)), 15.0) // Bug 29: cap delay at 15s, not 30s
+        let delay = min(pow(2.0, Double(reconnectAttempts)), 15.0)
         print("[Realtime] Reconnecting in \(delay)s (attempt \(reconnectAttempts)/\(maxReconnectAttempts), source: \(source))...")
 
-        // Clean up old socket
         isReceiving = false
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
@@ -328,7 +342,6 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                 } catch {
                     print("[Realtime] Reconnection failed: \(error.localizedDescription)")
                     self.isReconnecting = false
-                    // Bug 29: Non-recursive retry — schedule next attempt via handleDisconnect
                     self.handleDisconnect(source: "reconnect_retry")
                 }
             }

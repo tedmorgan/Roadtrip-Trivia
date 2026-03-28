@@ -31,6 +31,10 @@
 		A30002 /* correct_ching.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30002 /* correct_ching.mp3 */; };
 		A30003 /* incorrect_gong.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30003 /* incorrect_gong.mp3 */; };
 		D7A8E8BF2F535DDE00C9C74A /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */; };
+		D7D30EEB2F75A18500D76E6F /* StoreService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7D30EE92F75A18500D76E6F /* StoreService.swift */; };
+		D7D30EEC2F75A18500D76E6F /* RoundTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7D30EE72F75A18500D76E6F /* RoundTracker.swift */; };
+		D7D30EED2F75A18500D76E6F /* StoreProducts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7D30EE82F75A18500D76E6F /* StoreProducts.swift */; };
+		D7D30EEF2F75A1C300D76E6F /* PaywallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7D30EEE2F75A1C300D76E6F /* PaywallViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -61,6 +65,11 @@
 		B30002 /* correct_ching.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = correct_ching.mp3; sourceTree = "<group>"; };
 		B30003 /* incorrect_gong.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = incorrect_gong.mp3; sourceTree = "<group>"; };
 		D7A8E8BE2F535DDE00C9C74A /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+		D7D30EE72F75A18500D76E6F /* RoundTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundTracker.swift; sourceTree = "<group>"; };
+		D7D30EE82F75A18500D76E6F /* StoreProducts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreProducts.swift; sourceTree = "<group>"; };
+		D7D30EE92F75A18500D76E6F /* StoreService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreService.swift; sourceTree = "<group>"; };
+		D7D30EEE2F75A1C300D76E6F /* PaywallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallViewController.swift; sourceTree = "<group>"; };
+		D7D30EF02F75A21C00D76E6F /* RoadtripTriviaStore.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = RoadtripTriviaStore.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +104,7 @@
 				D10007 /* Services */,
 				D10008 /* iPhone */,
 				D10009 /* Resources */,
+				D7D30EF02F75A21C00D76E6F /* RoadtripTriviaStore.storekit */,
 			);
 			path = RoadtripTrivia;
 			sourceTree = "<group>";
@@ -152,6 +162,7 @@
 				D20001 /* Realtime */,
 				D10013 /* Auth */,
 				D10014 /* Persistence */,
+				D7D30EEA2F75A18500D76E6F /* Store */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -160,6 +171,7 @@
 			isa = PBXGroup;
 			children = (
 				B10019 /* IPhoneViewController.swift */,
+				D7D30EEE2F75A1C300D76E6F /* PaywallViewController.swift */,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -225,6 +237,16 @@
 				B20006 /* APIUsageLogger.swift */,
 			);
 			path = Realtime;
+			sourceTree = "<group>";
+		};
+		D7D30EEA2F75A18500D76E6F /* Store */ = {
+			isa = PBXGroup;
+			children = (
+				D7D30EE72F75A18500D76E6F /* RoundTracker.swift */,
+				D7D30EE82F75A18500D76E6F /* StoreProducts.swift */,
+				D7D30EE92F75A18500D76E6F /* StoreService.swift */,
+			);
+			path = Store;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -300,6 +322,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10001 /* AppDelegate.swift in Sources */,
+				D7D30EEB2F75A18500D76E6F /* StoreService.swift in Sources */,
+				D7D30EEC2F75A18500D76E6F /* RoundTracker.swift in Sources */,
+				D7D30EED2F75A18500D76E6F /* StoreProducts.swift in Sources */,
 				A10002 /* SceneDelegate.swift in Sources */,
 				D7A8E8BF2F535DDE00C9C74A /* CarPlaySceneDelegate.swift in Sources */,
 				A10004 /* CarPlayCoordinator.swift in Sources */,
@@ -319,6 +344,7 @@
 				A20004 /* AudioStreamingService.swift in Sources */,
 				A20005 /* SystemPromptBuilder.swift in Sources */,
 				A20006 /* APIUsageLogger.swift in Sources */,
+				D7D30EEF2F75A1C300D76E6F /* PaywallViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

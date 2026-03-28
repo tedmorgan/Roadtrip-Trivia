@@ -97,6 +97,18 @@ class IPhoneViewController: UIViewController {
             }
             .store(in: &cancellables)
 
+        // Listen for paywall requests (from CarPlay or RealtimeGameCoordinator)
+        NotificationCenter.default.publisher(for: RoundTracker.showPaywallNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.presentPaywall() }
+            .store(in: &cancellables)
+
+        // Also show paywall when round limit is reached mid-game
+        NotificationCenter.default.publisher(for: RoundTracker.roundLimitReachedNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.presentPaywall() }
+            .store(in: &cancellables)
+
         print("[IPhoneViewController] viewDidLoad complete")
     }
 
@@ -501,12 +513,25 @@ class IPhoneViewController: UIViewController {
             .sink { [weak self] category in self?.categoryLabel.text = category }
             .store(in: &cancellables)
 
-        gameViewModel.$displayQuestionInRound
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] question in
-                self?.questionLabel.text = question > 0 ? "Question \(question) / 5" : ""
+        // Lightning reuses the same round number but has no "5 questions" cap — avoid "Question 7 / 5".
+        Publishers.CombineLatest(
+            gameViewModel.$displayQuestionInRound,
+            gameViewModel.$lightningSecondsRemaining
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] question, lightningSecs in
+            guard let self else { return }
+            if question <= 0 {
+                self.questionLabel.text = ""
+                return
             }
-            .store(in: &cancellables)
+            if let s = lightningSecs, s > 0 {
+                self.questionLabel.text = "Lightning Q\(question)"
+            } else {
+                self.questionLabel.text = "Question \(question) / 5"
+            }
+        }
+        .store(in: &cancellables)
 
         gameViewModel.$displayRoundCorrect
             .receive(on: DispatchQueue.main)
@@ -599,6 +624,28 @@ class IPhoneViewController: UIViewController {
         let vc = LeaderboardViewController()
         let nav = UINavigationController(rootViewController: vc)
         nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+
+    // MARK: - Paywall
+
+    private func presentPaywall() {
+        // Don't present if already showing
+        if presentedViewController is UINavigationController,
+           (presentedViewController as? UINavigationController)?.topViewController is PaywallViewController {
+            return
+        }
+
+        let paywall = PaywallViewController()
+        let nav = UINavigationController(rootViewController: paywall)
+        nav.modalPresentationStyle = .formSheet
+        if #available(iOS 16.0, *) {
+            if let sheetController = nav.sheetPresentationController {
+                sheetController.detents = [.medium(), .large()]
+                sheetController.prefersGrabberVisible = true
+                sheetController.selectedDetentIdentifier = .large
+            }
+        }
         present(nav, animated: true)
     }
 }

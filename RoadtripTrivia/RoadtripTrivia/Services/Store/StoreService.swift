@@ -6,7 +6,6 @@ import Foundation
 /// Thread-safety: All published properties and public methods run on @MainActor.
 /// StoreKit 2 uses cryptographic on-device verification, so no server-side
 /// receipt validation is required for basic entitlement checks.
-@MainActor
 class StoreService: ObservableObject {
 
     static let shared = StoreService()
@@ -39,7 +38,7 @@ class StoreService: ObservableObject {
 
     // MARK: - Load Products from App Store
 
-    func loadProducts() async {
+    @MainActor func loadProducts() async {
         do {
             let fetched = try await Product.products(for: StoreProducts.allProductIDs)
             products = fetched.sorted { $0.price < $1.price }
@@ -52,7 +51,7 @@ class StoreService: ObservableObject {
     // MARK: - Purchase
 
     /// Initiate a purchase. Returns true on success, false on cancel/pending.
-    @discardableResult
+    @MainActor @discardableResult
     func purchase(_ product: Product) async throws -> Bool {
         purchaseError = nil
 
@@ -79,7 +78,7 @@ class StoreService: ObservableObject {
 
     // MARK: - Restore Purchases
 
-    func restorePurchases() async {
+    @MainActor func restorePurchases() async {
         do {
             try await AppStore.sync()
         } catch {
@@ -90,7 +89,7 @@ class StoreService: ObservableObject {
 
     // MARK: - Subscription Status
 
-    func updateSubscriptionStatus() async {
+    @MainActor func updateSubscriptionStatus() async {
         var activeIDs: Set<String> = []
 
         for await result in Transaction.currentEntitlements {
@@ -161,7 +160,7 @@ class StoreService: ObservableObject {
         }
     }
 
-    private func handleTransaction(_ transaction: Transaction) async {
+    @MainActor private func handleTransaction(_ transaction: Transaction) async {
         if StoreProducts.consumableIDs.contains(transaction.productID) {
             let rounds = StoreProducts.roundsForProduct(transaction.productID)
             RoundTracker.shared.addPurchasedRounds(rounds)
@@ -170,7 +169,7 @@ class StoreService: ObservableObject {
         await updateSubscriptionStatus()
     }
 
-    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+    private nonisolated func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
         case .unverified(_, let error):
             print("[Store] Transaction verification failed: \(error)")

@@ -9,7 +9,6 @@ import Combine
 ///   3. Purchased round packs (never expire)
 ///
 /// Notifies observers when `canPlayRound` changes so the UI can show/hide the paywall.
-@MainActor
 class RoundTracker: ObservableObject {
 
     static let shared = RoundTracker()

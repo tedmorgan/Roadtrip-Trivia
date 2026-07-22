@@ -54,12 +54,33 @@ class CarPlayCoordinator: NSObject {
 
         // Rebuild home screen when auth state changes so "Sign In to Play"
         // is cleared once the user signs in on iPhone.
+        // dropFirst: initial value was already reflected in homeTemplate above.
         authService.$isAuthenticated
+            .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
                 let newHome = self.buildHomeTemplate()
                 self.interfaceController.setRootTemplate(newHome, animated: false, completion: nil)
+            }
+            .store(in: &cancellables)
+
+        // Rebuild home screen when round balance changes (e.g. after consumption or purchase)
+        // so the "X rounds available" label and Start/Get More button stay current.
+        // Also auto-return to home if the game is over (user just purchased rounds).
+        // dropFirst: home template was just built above with the current balance; skip
+        // the immediate emission so we don't call setRootTemplate a third time on startup.
+        RoundTracker.shared.$roundBalance
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let newHome = self.buildHomeTemplate()
+                self.interfaceController.setRootTemplate(newHome, animated: false, completion: nil)
+                if RoundTracker.shared.canPlayRound && self.gameViewModel.currentPhase == .gameOver {
+                    self.returnToHome()
+                }
             }
             .store(in: &cancellables)
     }
@@ -312,7 +333,8 @@ class CarPlayCoordinator: NSObject {
                 // When the game ends, show score summary briefly then return home
                 if phase == .gameOver {
                     self.pushScoreSummary()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+                    let delay: TimeInterval = RoundTracker.shared.canPlayRound ? 8.0 : 3.0
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                         self?.returnToHome()
                     }
                 }

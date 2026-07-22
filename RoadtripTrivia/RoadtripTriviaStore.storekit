@@ -1,0 +1,163 @@
+{
+  "identifier" : "A1B2C3D4",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "rounds3",
+      "localizations" : [
+        {
+          "description" : "3 rounds of trivia, use anytime",
+          "displayName" : "3-Round Pack",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.nagrom.roadtrip.rounds.3",
+      "referenceName" : "3 Round Pack",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "rounds10",
+      "localizations" : [
+        {
+          "description" : "10 rounds of trivia, use anytime",
+          "displayName" : "10-Round Pack",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.nagrom.roadtrip.rounds.10",
+      "referenceName" : "10 Round Pack",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "roadtrip_trivia_pass",
+      "localizations" : [
+        {
+          "description" : "Unlock rounds of voice-powered trivia",
+          "displayName" : "Roadtrip Trivia Pass",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "Roadtrip Trivia Pass",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "12.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "monthly",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "10 rounds per month of voice-powered trivia",
+              "displayName" : "Monthly Pass",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.nagrom.roadtrip.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly Pass",
+          "subscriptionGroupID" : "roadtrip_trivia_pass",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "weekly",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "5 rounds per week of voice-powered trivia",
+              "displayName" : "Weekly Pass",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.nagrom.roadtrip.weekly",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "Weekly Pass",
+          "subscriptionGroupID" : "roadtrip_trivia_pass",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

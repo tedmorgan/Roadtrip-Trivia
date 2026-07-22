@@ -153,6 +153,20 @@ class GameViewModel: ObservableObject {
         currentSession!.lastPlayedAt = Date()
     }
 
+    /// Second `report_score` for the same question (host corrected grading).
+    /// Does not increment questionsAnswered again; adjusts correct counts by delta.
+    func reviseRealtimeScore(fromPreviousCorrect previous: Bool, to newCorrect: Bool, wasHint: Bool, wasChallenge: Bool) {
+        guard currentSession != nil else { return }
+        guard !wasHint, !wasChallenge else { return }
+        guard !currentSession!.rounds.isEmpty else { return }
+        let roundIndex = currentSession!.rounds.count - 1
+        let delta = (newCorrect ? 1 : 0) - (previous ? 1 : 0)
+        guard delta != 0 else { return }
+        currentSession!.rounds[roundIndex].questionsCorrect += delta
+        currentSession!.rounds[roundIndex].score = currentSession!.rounds[roundIndex].questionsCorrect
+        currentSession!.lastPlayedAt = Date()
+    }
+
     // MARK: - Hints & Challenges
 
     func useHint(at questionIndex: Int) {

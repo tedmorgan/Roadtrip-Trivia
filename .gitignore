@@ -22,6 +22,25 @@ SystemPromptBuilder_backup_phase1.swift
 # Provisioning profiles (sensitive)
 *.mobileprovision
 
+# API / auth keys (sensitive) — never commit
+*.p8
+AuthKey_*.p8
+
+# Agent worktrees / scratch
+.claude/worktrees/
+
+# Debug data artifacts
+api_usage*.csv
+
+# Node deps (JWT helper script only)
+node_modules/
+
 # Environment files
 .env
 .env.local
+
+# SwiftPM (test runner for RoadtripTriviaLogic)
+.build/
+.swiftpm/
+.swiftpm-cache/
+Package.resolved

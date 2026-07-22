@@ -12,6 +12,7 @@ class IPhoneViewController: UIViewController {
     private let gameViewModel = GameViewModel.shared
     private let authService = AuthService.shared
     private var cancellables = Set<AnyCancellable>()
+    private var paywallDeferred = false
 
     // MARK: - Arcade Color Palette
     let colorDeepPurple = UIColor(red: 0x1A / 255.0, green: 0x0A / 255.0, blue: 0x2E / 255.0, alpha: 1.0)
@@ -51,6 +52,8 @@ class IPhoneViewController: UIViewController {
     private let subtitleLabel = UILabel()
     private let idleMessageLabel = UILabel()
     private let signInNoticeLabel = UILabel()
+    private let roundsBadge = UIView()
+    private let roundsBadgeLabel = UILabel()
 
     // Playing state views (stacked in a container)
     private let playingContainer = UIView()
@@ -100,13 +103,20 @@ class IPhoneViewController: UIViewController {
         // Listen for paywall requests (from CarPlay or RealtimeGameCoordinator)
         NotificationCenter.default.publisher(for: RoundTracker.showPaywallNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.presentPaywall() }
+            .sink { [weak self] _ in self?.presentOrDeferPaywall() }
             .store(in: &cancellables)
 
         // Also show paywall when round limit is reached mid-game
         NotificationCenter.default.publisher(for: RoundTracker.roundLimitReachedNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.presentPaywall() }
+            .sink { [weak self] _ in self?.presentOrDeferPaywall() }
+            .store(in: &cancellables)
+
+        // Keep rounds badge current after purchases or consumption
+        RoundTracker.shared.$roundBalance
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateRoundsBadge() }
             .store(in: &cancellables)
 
         print("[IPhoneViewController] viewDidLoad complete")
@@ -115,6 +125,11 @@ class IPhoneViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         updateDisplayMode()
+
+        if paywallDeferred {
+            paywallDeferred = false
+            presentPaywall()
+        }
     }
 
     // MARK: - CarPlay Connection Polling
@@ -222,7 +237,15 @@ class IPhoneViewController: UIViewController {
             action: #selector(showLeaderboards)
         )
         trophyButton.tintColor = colorNeonCyan
-        navigationItem.leftBarButtonItem = trophyButton
+
+        let roundsButton = UIBarButtonItem(
+            image: UIImage(systemName: "cart.fill"),
+            style: .plain,
+            target: self,
+            action: #selector(showRoundsStore)
+        )
+        roundsButton.tintColor = colorNeonGreen
+        navigationItem.leftBarButtonItems = [trophyButton, roundsButton]
 
         let gearButton = UIBarButtonItem(
             image: UIImage(systemName: "gearshape.fill"),
@@ -296,11 +319,60 @@ class IPhoneViewController: UIViewController {
         signInNoticeLabel.textAlignment = .center
         signInNoticeLabel.numberOfLines = 0
 
+        // Rounds badge — tappable card showing current balance
+        roundsBadge.translatesAutoresizingMaskIntoConstraints = false
+        roundsBadge.backgroundColor = colorDeepPurple
+        roundsBadge.layer.cornerRadius = 16
+        roundsBadge.layer.borderWidth = 1.5
+        roundsBadge.layer.borderColor = colorNeonGreen.cgColor
+        applyNeonGlow(to: roundsBadge, color: colorNeonGreen, radius: 10, opacity: 0.5)
+
+        roundsBadgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        roundsBadgeLabel.font = roundedFont(size: 16, weight: .bold)
+        roundsBadgeLabel.textColor = colorNeonGreen
+        roundsBadgeLabel.textAlignment = .center
+        roundsBadgeLabel.numberOfLines = 1
+        roundsBadge.addSubview(roundsBadgeLabel)
+
+        let cartIcon = UIImageView(image: UIImage(systemName: "cart.fill"))
+        cartIcon.translatesAutoresizingMaskIntoConstraints = false
+        cartIcon.tintColor = colorNeonGreen
+        cartIcon.contentMode = .scaleAspectFit
+        roundsBadge.addSubview(cartIcon)
+
+        let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.tintColor = colorNeonGreen.withAlphaComponent(0.6)
+        chevron.contentMode = .scaleAspectFit
+        roundsBadge.addSubview(chevron)
+
+        NSLayoutConstraint.activate([
+            cartIcon.leadingAnchor.constraint(equalTo: roundsBadge.leadingAnchor, constant: 16),
+            cartIcon.centerYAnchor.constraint(equalTo: roundsBadge.centerYAnchor),
+            cartIcon.widthAnchor.constraint(equalToConstant: 22),
+            cartIcon.heightAnchor.constraint(equalToConstant: 22),
+
+            roundsBadgeLabel.leadingAnchor.constraint(equalTo: cartIcon.trailingAnchor, constant: 10),
+            roundsBadgeLabel.centerYAnchor.constraint(equalTo: roundsBadge.centerYAnchor),
+            roundsBadgeLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
+
+            chevron.trailingAnchor.constraint(equalTo: roundsBadge.trailingAnchor, constant: -16),
+            chevron.centerYAnchor.constraint(equalTo: roundsBadge.centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 12),
+            chevron.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(showRoundsStore))
+        roundsBadge.addGestureRecognizer(tapGesture)
+        roundsBadge.isUserInteractionEnabled = true
+        updateRoundsBadge()
+
         contentView.addSubview(appIconView)
         contentView.addSubview(titleLabel)
         contentView.addSubview(subtitleLabel)
         contentView.addSubview(idleMessageLabel)
         contentView.addSubview(signInNoticeLabel)
+        contentView.addSubview(roundsBadge)
 
         NSLayoutConstraint.activate([
             appIconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 40),
@@ -323,7 +395,12 @@ class IPhoneViewController: UIViewController {
             signInNoticeLabel.topAnchor.constraint(equalTo: idleMessageLabel.bottomAnchor, constant: 12),
             signInNoticeLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             signInNoticeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            signInNoticeLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
+
+            roundsBadge.topAnchor.constraint(equalTo: signInNoticeLabel.bottomAnchor, constant: 24),
+            roundsBadge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32),
+            roundsBadge.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32),
+            roundsBadge.heightAnchor.constraint(equalToConstant: 52),
+            roundsBadge.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
         ])
     }
 
@@ -559,9 +636,11 @@ class IPhoneViewController: UIViewController {
         titleLabel.isHidden = isPlaying
         subtitleLabel.isHidden = isPlaying
         idleMessageLabel.isHidden = isPlaying
+        roundsBadge.isHidden = isPlaying
         playingContainer.isHidden = !isPlaying
 
         if !isPlaying {
+            updateRoundsBadge()
             if isCarPlayConnected {
                 idleMessageLabel.text = "Connected to CarPlay\nStart a game from your car screen!"
             } else {
@@ -627,7 +706,38 @@ class IPhoneViewController: UIViewController {
         present(nav, animated: true)
     }
 
+    @objc private func showRoundsStore() {
+        presentPaywall()
+    }
+
+    private func updateRoundsBadge() {
+        let balance = RoundTracker.shared.totalRoundsAvailable
+        if balance == 0 {
+            roundsBadgeLabel.text = "No rounds — Tap to get more"
+            roundsBadge.layer.borderColor = colorNeonOrange.cgColor
+            roundsBadgeLabel.textColor = colorNeonOrange
+            applyNeonGlow(to: roundsBadge, color: colorNeonOrange, radius: 10, opacity: 0.5)
+        } else {
+            roundsBadgeLabel.text = "\(balance) round\(balance == 1 ? "" : "s") available"
+            roundsBadge.layer.borderColor = colorNeonGreen.cgColor
+            roundsBadgeLabel.textColor = colorNeonGreen
+            applyNeonGlow(to: roundsBadge, color: colorNeonGreen, radius: 10, opacity: 0.5)
+        }
+    }
+
     // MARK: - Paywall
+
+    private func presentOrDeferPaywall() {
+        let isVisible = viewIfLoaded?.window != nil
+        print("[IPhoneViewController] presentOrDeferPaywall — isVisible:\(isVisible) roundBalance:\(RoundTracker.shared.totalRoundsAvailable) canPlay:\(RoundTracker.shared.canPlayRound)")
+        if isVisible {
+            print("[IPhoneViewController] Paywall presenting immediately (VC visible)")
+            presentPaywall()
+        } else {
+            paywallDeferred = true
+            print("[IPhoneViewController] Paywall deferred — VC not visible (CarPlay active?)")
+        }
+    }
 
     private func presentPaywall() {
         // Don't present if already showing
@@ -1495,6 +1605,63 @@ class AccountSettingsSheet: UIViewController {
 
         contentStack.addArrangedSubview(infoCard)
 
+        // Subscription & Rounds section
+        contentStack.addArrangedSubview(makeSectionHeader(title: "SUBSCRIPTION & ROUNDS"))
+
+        let roundsCard = makeSectionCard()
+        roundsCard.layer.borderColor = colorNeonGreen.withAlphaComponent(0.4).cgColor
+        let roundsStack = UIStackView()
+        roundsStack.axis = .vertical
+        roundsStack.spacing = 12
+        roundsStack.alignment = .fill
+        roundsStack.translatesAutoresizingMaskIntoConstraints = false
+        roundsCard.addSubview(roundsStack)
+        NSLayoutConstraint.activate([
+            roundsStack.topAnchor.constraint(equalTo: roundsCard.topAnchor, constant: 16),
+            roundsStack.leadingAnchor.constraint(equalTo: roundsCard.leadingAnchor, constant: 16),
+            roundsStack.trailingAnchor.constraint(equalTo: roundsCard.trailingAnchor, constant: -16),
+            roundsStack.bottomAnchor.constraint(equalTo: roundsCard.bottomAnchor, constant: -16),
+        ])
+
+        let balanceLabel = UILabel()
+        let balance = RoundTracker.shared.totalRoundsAvailable
+        balanceLabel.text = "\(balance) round\(balance == 1 ? "" : "s") available"
+        balanceLabel.font = roundedFont(size: 28, weight: .heavy)
+        balanceLabel.textColor = balance > 0 ? colorNeonGreen : colorNeonOrange
+        balanceLabel.textAlignment = .center
+        roundsStack.addArrangedSubview(balanceLabel)
+
+        let roundsStatusLabel = UILabel()
+        roundsStatusLabel.text = RoundTracker.shared.statusSummary
+        roundsStatusLabel.font = roundedFont(size: 14, weight: .medium)
+        roundsStatusLabel.textColor = .white.withAlphaComponent(0.7)
+        roundsStatusLabel.textAlignment = .center
+        roundsStatusLabel.numberOfLines = 0
+        roundsStack.addArrangedSubview(roundsStatusLabel)
+
+        if StoreService.shared.isSubscribed, let subID = StoreService.shared.activeSubscription {
+            let planLabel = UILabel()
+            let planName = subID == StoreProducts.weeklyPass ? "Weekly Pass" : "Monthly Pass"
+            planLabel.text = "Active plan: \(planName)"
+            planLabel.font = roundedFont(size: 13, weight: .semibold)
+            planLabel.textColor = colorNeonCyan
+            planLabel.textAlignment = .center
+            roundsStack.addArrangedSubview(planLabel)
+        }
+
+        let manageButton = UIButton(type: .system)
+        manageButton.setTitle("Manage Subscription & Rounds", for: .normal)
+        manageButton.titleLabel?.font = roundedFont(size: 16, weight: .bold)
+        manageButton.setTitleColor(colorDarkVoid, for: .normal)
+        manageButton.backgroundColor = colorNeonGreen
+        manageButton.layer.cornerRadius = 12
+        manageButton.translatesAutoresizingMaskIntoConstraints = false
+        manageButton.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        manageButton.addTarget(self, action: #selector(handleManageRounds), for: .touchUpInside)
+        roundsStack.addArrangedSubview(manageButton)
+
+        contentStack.addArrangedSubview(roundsCard)
+
         // Account actions section
         contentStack.addArrangedSubview(makeSectionHeader(title: "ACCOUNT"))
 
@@ -1564,6 +1731,20 @@ class AccountSettingsSheet: UIViewController {
 
     @objc private func dismissSheet() {
         dismiss(animated: true)
+    }
+
+    @objc private func handleManageRounds() {
+        let paywall = PaywallViewController()
+        let nav = UINavigationController(rootViewController: paywall)
+        nav.modalPresentationStyle = .formSheet
+        if #available(iOS 16.0, *) {
+            if let sheet = nav.sheetPresentationController {
+                sheet.detents = [.medium(), .large()]
+                sheet.prefersGrabberVisible = true
+                sheet.selectedDetentIdentifier = .large
+            }
+        }
+        present(nav, animated: true)
     }
 
     @objc private func segmentChanged(_ sender: UISegmentedControl) {

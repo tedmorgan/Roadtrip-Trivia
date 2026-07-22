@@ -27,6 +27,21 @@ class StoreService: ObservableObject {
     // MARK: - Private
 
     private var transactionListener: Task<Void, Error>?
+    /// Guards against double-crediting consumable rounds when both the
+    /// purchase() callback and Transaction.updates fire for the same txn.
+    /// Persisted: a credit-then-crash must not re-credit on next launch
+    /// when StoreKit redelivers the unfinished transaction.
+    private let processedTxnIDsKey = "store_processedConsumableTxnIDs"
+    private lazy var processedConsumableTxnIDs: Set<UInt64> = {
+        let stored = UserDefaults.standard.array(forKey: processedTxnIDsKey) as? [String] ?? []
+        return Set(stored.compactMap { UInt64($0) })
+    }()
+
+    private func persistProcessedTxnIDs() {
+        // Keep the persisted set bounded — old finished transactions never redeliver.
+        let recent = processedConsumableTxnIDs.sorted().suffix(50)
+        UserDefaults.standard.set(recent.map(String.init), forKey: processedTxnIDsKey)
+    }
 
     private init() {
         transactionListener = listenForTransactions()
@@ -162,9 +177,15 @@ class StoreService: ObservableObject {
 
     @MainActor private func handleTransaction(_ transaction: Transaction) async {
         if StoreProducts.consumableIDs.contains(transaction.productID) {
+            guard !processedConsumableTxnIDs.contains(transaction.id) else {
+                print("[Store] Consumable txn \(transaction.id) already credited — skipping duplicate")
+                return
+            }
+            processedConsumableTxnIDs.insert(transaction.id)
+            persistProcessedTxnIDs()
             let rounds = StoreProducts.roundsForProduct(transaction.productID)
             RoundTracker.shared.addPurchasedRounds(rounds)
-            print("[Store] Consumable purchased: +\(rounds) rounds")
+            print("[Store] Consumable purchased: +\(rounds) rounds (txn \(transaction.id))")
         }
         await updateSubscriptionStatus()
     }

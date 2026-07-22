@@ -81,7 +81,11 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// Falls back gracefully: town → city → state → country
     static func formatLocationLabel(from placemark: CLPlacemark) -> String {
         let town = placemark.locality
-        let state = placemark.administrativeArea
+        // administrativeArea is the postal abbreviation ("MA"). The label is
+        // read aloud by the voice model, which mis-expands abbreviations —
+        // "Needham, MA" was spoken as "Needham, Maine" (2026-06-12). Always
+        // spell out the full state name.
+        let state = placemark.administrativeArea.map { Self.fullStateName($0) }
         let majorCity = placemark.subAdministrativeArea
 
         if let town, let state {
@@ -100,5 +104,30 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
 
         return "somewhere in the United States"
+    }
+
+    /// Expand a US postal abbreviation to the full state name. Returns the
+    /// input unchanged if it isn't a known abbreviation (e.g. already a full
+    /// name, or a non-US administrative area).
+    static func fullStateName(_ abbreviation: String) -> String {
+        let states: [String: String] = [
+            "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+            "CA": "California", "CO": "Colorado", "CT": "Connecticut",
+            "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii",
+            "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
+            "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine",
+            "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan",
+            "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri",
+            "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+            "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico",
+            "NY": "New York", "NC": "North Carolina", "ND": "North Dakota",
+            "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon",
+            "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+            "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+            "UT": "Utah", "VT": "Vermont", "VA": "Virginia",
+            "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin",
+            "WY": "Wyoming", "DC": "Washington, D.C."
+        ]
+        return states[abbreviation.uppercased()] ?? abbreviation
     }
 }

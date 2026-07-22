@@ -26,6 +26,9 @@ class RoundTracker: ObservableObject {
     /// True when the user has at least one round available from any source.
     @Published private(set) var canPlayRound = true
 
+    /// Current round balance — published so CarPlay can update the label whenever it changes.
+    @Published private(set) var roundBalance: Int = 0
+
     /// Notification posted when round budget is exhausted mid-session.
     static let roundLimitReachedNotification = Notification.Name("RoundTracker.roundLimitReached")
 
@@ -34,6 +37,7 @@ class RoundTracker: ObservableObject {
 
     private init() {
         refreshCanPlay()
+        roundBalance = totalRoundsAvailable
     }
 
     // MARK: - Free Round
@@ -154,6 +158,11 @@ class RoundTracker: ObservableObject {
 
         if canPlayRound != available {
             canPlayRound = available
+        }
+
+        let count = totalRoundsAvailable
+        if roundBalance != count {
+            roundBalance = count
         }
     }
 

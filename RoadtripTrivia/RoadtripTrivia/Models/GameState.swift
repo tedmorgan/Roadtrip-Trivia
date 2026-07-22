@@ -8,7 +8,7 @@ enum GamePhase: Equatable {
     /// App launched, no game in progress.
     case idle
 
-    /// Connecting to OpenAI Realtime API (fetching token, establishing WebSocket).
+    /// Connecting to Gemini Live API (fetching token, establishing WebSocket).
     case connecting
 
     /// Connected and active — the LLM is hosting the game.
@@ -133,5 +133,41 @@ struct SessionCheckpoint: Codable {
         self.ageBands = ageBands
         self.teamName = teamName
         self.savedAt = savedAt
+    }
+}
+
+// MARK: - Game State Packet (structured context for LLM reconnects)
+
+/// Machine-readable snapshot of the full game state, serialized as JSON in the
+/// system prompt so the LLM can parse it unambiguously on reconnect.
+struct GameStatePacket: Codable {
+    let roundNumber: Int
+    let questionIndex: Int
+    let category: String
+    let difficulty: String
+    let playerCount: Int
+    let teamName: String
+    let ageBands: [String]
+    let totalCorrect: Int
+    let totalAnswered: Int
+    let roundCorrect: Int
+    let roundAnswered: Int
+    let totalPoints: Int
+    let roundPoints: Int
+    let hintsUsed: Int
+    let challengesUsed: Int
+    let isLightningRound: Bool
+    let lightningSecondsRemaining: Int?
+    let currentRoundQuestions: [String]
+    let usedCategories: [String]
+
+    func toJSON() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(self),
+              let str = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return str
     }
 }

@@ -67,9 +67,25 @@ class APIUsageLogger {
         if let phase { contextPhase = phase }
     }
 
+    /// One-shot trigger tag set by the coordinator right before it provokes a
+    /// model turn (watchdog nudge, reconnect, etc.). Attached to the next
+    /// `response.done` entry and cleared — lets the cost analyzer attribute
+    /// token spend to normal turns vs recovery actions.
+    private var pendingTrigger: String?
+
+    /// Tag the next response.done entry with what provoked it.
+    func noteTrigger(_ trigger: String) {
+        pendingTrigger = trigger
+    }
+
     /// Log a `response.done` event when the API includes a `usage` object (real token counts + modality breakdown).
     func logResponseDone(status: String, usage: ResponseUsage) {
-        writeEntry("[RECV] type=response.done | status=\(status) | input_tokens=\(usage.inputTokens) | output_tokens=\(usage.outputTokens) | total_tokens=\(usage.totalTokens)\(usage.detailLogSuffix())")
+        var triggerSuffix = ""
+        if let t = pendingTrigger {
+            triggerSuffix = " | trigger=\(t)"
+            pendingTrigger = nil
+        }
+        writeEntry("[RECV] type=response.done | status=\(status) | input_tokens=\(usage.inputTokens) | output_tokens=\(usage.outputTokens) | total_tokens=\(usage.totalTokens)\(usage.detailLogSuffix())\(triggerSuffix)")
     }
 
     // MARK: - Private

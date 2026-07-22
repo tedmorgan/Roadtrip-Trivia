@@ -13,3 +13,6 @@ verify_jwt = false
 
 [functions.realtime-token]
 verify_jwt = false
+
+[functions.gemini-token]
+verify_jwt = false

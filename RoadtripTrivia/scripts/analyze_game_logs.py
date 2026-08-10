@@ -19,7 +19,7 @@ Checks:
   FAILSAFE  stuck-mute failsafe firings (should be rare; >2/game = problem)
   PREROLL   pre-roll flushes (info: early answers that would have been lost)
   TTSFALL   farewell chunks delivered via local TTS fallback (info)
-  COST      token usage + estimated $ per round (api_usage log)
+  COST      Grok Voice audio-minute estimate + token usage (api_usage / mic logs)
 """
 
 import json
@@ -37,14 +37,19 @@ NUDGE_BUDGET_PER_QUESTION = 3
 # dead air, so the stall detector resets instead of flagging.
 SESSION_BOUNDARY_MARKERS = (
     "loadQuestionHistory",
+    "fetching ephemeral token",
     "fetching API key",
     "STREAMING_STARTED",
+    "Starting Grok Voice connection",
     "Starting Gemini connection",
 )
 
-# $/1M tokens — Gemini Live audio pricing; adjust as Google updates pricing.
-PRICE_INPUT_PER_M = 3.00
-PRICE_OUTPUT_PER_M = 12.00
+# Grok Voice Think Fast 2.0: billed per audio minute + text input events.
+# https://docs.x.ai/developers/models
+PRICE_AUDIO_PER_MIN = 0.08
+PRICE_TEXT_INPUT_EVENT = 0.004
+# Soft budget for a normal ~5-question round (~3–6 audio minutes wall/mic).
+COST_BUDGET_PER_ROUND = 0.50
 
 
 def load_jsonl(path):
@@ -111,15 +116,28 @@ def audit_debug_logs(events, report):
 def audit_mic_log(events, report):
     for e in events:
         msg = e.get("message", "")
+        data = e.get("data", {}) or {}
         if msg == "MUTE_FAILSAFE_FIRED":
             report["FAILSAFE"].append("stuck-mute failsafe fired")
         elif msg == "PREROLL_FLUSH":
             report["PREROLL"].append(
-                f"pre-roll flushed {e.get('data',{}).get('chunks','?')} chunks")
+                f"pre-roll flushed {data.get('chunks','?')} chunks")
         elif msg == "BARGE_BLOCKED":
-            report["INFO"].append(f"barge-in blocked ({e.get('data',{}).get('verdict','')})")
-        elif msg == "MIC_ON" and e.get("data", {}).get("reason") == "barge-in":
+            report["INFO"].append(f"barge-in blocked ({data.get('verdict','')})")
+        elif msg == "MIC_ON" and data.get("reason") == "barge-in":
             report["CUTOFF"].append("barge-in honored (check audio context: genuine answer or false trigger?)")
+        elif msg == "SESSION_SUMMARY":
+            # Rough upper-bound: wall-clock session seconds × Grok $/min.
+            # Actual bill is audio sent+received; mic gating keeps this closer
+            # to speech time than raw wall clock.
+            total_sec = data.get("totalSessionSec") or data.get("totalOnSec")
+            if isinstance(total_sec, (int, float)) and total_sec > 0:
+                mins = total_sec / 60.0
+                est = mins * PRICE_AUDIO_PER_MIN
+                report["COST"].append(
+                    f"mic session ≈ {mins:.1f} min wall → ~${est:.3f} "
+                    f"(@ ${PRICE_AUDIO_PER_MIN:.2f}/audio-min Grok Voice 2.0)"
+                )
 
 
 def audit_tts_fallback(events, report):
@@ -133,11 +151,14 @@ USAGE_RE = re.compile(
     r"input_tokens=(\d+) \| output_tokens=(\d+) \| total_tokens=(\d+)(.*)$")
 ROUND_RE = re.compile(r"round=(\d+)")
 TRIGGER_RE = re.compile(r"trigger=(\S+)")
+AUDIO_IN_RE = re.compile(r"in_audio=(\d+)")
+AUDIO_OUT_RE = re.compile(r"out_audio=(\d+)")
 
 
 def audit_api_usage(path, report):
     per_round_in = defaultdict(int)
     per_round_out = defaultdict(int)
+    per_round_audio = defaultdict(int)
     trigger_in = defaultdict(int)
     with open(path, errors="replace") as f:
         for line in f:
@@ -150,6 +171,12 @@ def audit_api_usage(path, report):
             rnd = int(rm.group(1)) if rm else 0
             per_round_in[rnd] += inp
             per_round_out[rnd] += out
+            ain = AUDIO_IN_RE.search(rest)
+            aout = AUDIO_OUT_RE.search(rest)
+            if ain:
+                per_round_audio[rnd] += int(ain.group(1))
+            if aout:
+                per_round_audio[rnd] += int(aout.group(1))
             tm = TRIGGER_RE.search(rest)
             if tm:
                 trigger_in[tm.group(1)] += inp + out
@@ -158,19 +185,24 @@ def audit_api_usage(path, report):
     if not rounds:
         report["INFO"].append("no per-round token data in api_usage log")
         return
-    total_cost = 0.0
+
+    report["COST"].append(
+        f"Grok Voice pricing: ${PRICE_AUDIO_PER_MIN:.2f}/audio-min + "
+        f"${PRICE_TEXT_INPUT_EVENT:.3f}/text-input event "
+        f"(token totals below are diagnostic; bill is audio-minute based)"
+    )
     for r in rounds:
-        cost = (per_round_in[r] / 1e6) * PRICE_INPUT_PER_M + \
-               (per_round_out[r] / 1e6) * PRICE_OUTPUT_PER_M
-        total_cost += cost
-        report["COST"].append(
-            f"round {r}: in={per_round_in[r]:,} out={per_round_out[r]:,} ≈ ${cost:.3f}")
-    avg = total_cost / len(rounds)
-    verdict = "OK" if avg <= 0.25 else "OVER BUDGET (target ≤ $0.25/round)"
-    report["COST"].append(f"average ≈ ${avg:.3f}/round — {verdict}")
+        line = f"round {r}: in={per_round_in[r]:,} out={per_round_out[r]:,}"
+        if per_round_audio[r]:
+            line += f" audio_tokens={per_round_audio[r]:,}"
+        report["COST"].append(line)
     if trigger_in:
         for t, tok in sorted(trigger_in.items(), key=lambda kv: -kv[1]):
             report["COST"].append(f"recovery-trigger spend: {t} = {tok:,} tokens")
+    report["COST"].append(
+        f"budget target ≤ ${COST_BUDGET_PER_ROUND:.2f}/round "
+        f"(~{COST_BUDGET_PER_ROUND / PRICE_AUDIO_PER_MIN:.1f} audio-min)"
+    )
 
 
 def main():
@@ -211,7 +243,7 @@ def main():
         ("FAILSAFE", "Stuck-mute failsafe firings", True),
         ("TTSFALL", "Farewell delivered via local TTS fallback", False),
         ("PREROLL", "Early answers rescued by pre-roll", False),
-        ("COST", "Token cost", False),
+        ("COST", "Grok Voice cost estimate", False),
         ("INFO", "Info", False),
     ]:
         items = report.get(key, [])

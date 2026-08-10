@@ -1,15 +1,12 @@
 import Foundation
 
-// MARK: - Client → Server Events (Gemini Live API)
+// MARK: - Client → Server Events (xAI Realtime API)
 
-/// Wrapper for all events sent to the Gemini Live API over WebSocket.
-/// Cases mirror the original OpenAI Realtime event model so the coordinator
-/// layer stays unchanged; serialisation targets Gemini's BidiGenerateContent
-/// wire format instead.
+/// Wrapper for events sent to Grok Voice over xAI's OpenAI-compatible
+/// Realtime WebSocket API.
 enum RealtimeClientEvent {
 
-    /// Initial session setup – sent as the very first WebSocket message.
-    /// Gemini equivalent of OpenAI's `session.update`.
+    /// Configure the voice session after the WebSocket opens.
     case sessionUpdate(SessionConfig)
 
     /// Append a chunk of base64-encoded PCM16 audio from the microphone.
@@ -18,139 +15,111 @@ enum RealtimeClientEvent {
     /// Clear the audio buffer (unused in practice).
     case inputAudioBufferClear
 
-    /// Inject instructions into the conversation as a user turn.
-    /// Gemini has no `response.create`; instead we send `clientContent`.
-    /// When `instructions` is nil this is a no-op (model auto-continues).
+    /// Ask Grok to generate the next response, optionally with one-turn
+    /// instructions. `response.create` itself is not a billable text event.
     case responseCreate(instructions: String?)
 
     /// Provide the result of a function call back to the model.
-    /// In Gemini these are batched into a single `toolResponse`; the session
-    /// manager collects them, but this case is kept for compatibility.
     case conversationItemCreate(callId: String, name: String, output: String)
 
+    /// Speak a verbatim TTS line without involving the model (xAI extension).
+    /// Do not follow with `response.create` — this item IS the turn.
+    case forceMessage(text: String, interruptible: Bool)
+
+    /// Mid-session ASR bias for the current question's answer vocabulary.
+    case transcriptionKeyterms([String])
+
     /// Interrupt the model's current generation.
-    /// Gemini equivalent: send `clientContent` with `turnComplete: true`.
     case responseCancel
 
     func toJSON() -> [String: Any]? {
         switch self {
         case .sessionUpdate(let config):
-            var generationConfig: [String: Any] = [
-                "responseModalities": ["AUDIO"],
-            ]
-            if let speechConfig = config.speechConfig {
-                generationConfig["speechConfig"] = speechConfig
-            }
-
-            var setup: [String: Any] = [
-                "model": "models/\(config.model)",
-                "generationConfig": generationConfig,
-                "systemInstruction": [
-                    "parts": [["text": config.instructions]]
+            var session: [String: Any] = [
+                "instructions": config.instructions,
+                "voice": config.voice,
+                // High road-noise threshold plus the existing local RMS
+                // corroboration prevents false cabin-noise barge-ins.
+                "turn_detection": [
+                    "type": "server_vad",
+                    "threshold": 0.85,
+                    "silence_duration_ms": 800,
+                    "prefix_padding_ms": 333
                 ] as [String: Any],
+                "audio": [
+                    "input": [
+                        "format": ["type": "audio/pcm", "rate": 16000],
+                        "transport": "json",
+                        "transcription": ["model": "grok-transcribe"]
+                    ] as [String: Any],
+                    "output": [
+                        "format": ["type": "audio/pcm", "rate": 24000],
+                        "transport": "json"
+                    ] as [String: Any]
+                ] as [String: Any],
+                // Think Fast's high reasoning default is unnecessary for the
+                // app-owned game state and adds perceptible voice latency.
+                "reasoning": ["effort": "none"],
+                "resumption": ["enabled": true]
             ]
-
             if !config.tools.isEmpty {
-                setup["tools"] = [
-                    ["functionDeclarations": config.tools.map { $0.toDictionary() }]
-                ]
+                session["tools"] = config.tools.map { $0.toDictionary() }
             }
-
-            // START_SENSITIVITY_LOW: the server VAD must hear confident
-            // speech onset before declaring a turn/interruption. HIGH was
-            // trigger-happy in a moving car — cabin noise and speaker echo
-            // tripped `interrupted` events that cut the host off mid-sentence
-            // (the #1 reported defect). The client-side pre-roll buffer
-            // covers any onset the lower sensitivity might delay.
-            setup["realtimeInputConfig"] = [
-                "automaticActivityDetection": [
-                    "startOfSpeechSensitivity": "START_SENSITIVITY_LOW",
-                    "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-                    "silenceDurationMs": 800,
-                    "prefixPaddingMs": 100
-                ] as [String: Any]
-            ] as [String: Any]
-
-            setup["outputAudioTranscription"] = [String: Any]()
-
-            // Sliding-window context compression — configured purely as a
-            // SAFETY NET near the model's hard context ceiling, NOT as an
-            // active cost-control mechanism.
-            //
-            // History: a low trigger (25.6K) compressed the conversation ~5x
-            // per game. Each compression event discarded recent turns
-            // mid-flow, which the docs warn can make the model "slow down or
-            // hallucinate" — observed directly as multi-second dead pauses,
-            // host confusion, cut-off reactions, and the R3 freeze
-            // (debug-f3b222.log 2026-06-24). See the token collapse
-            // 48,931 -> 17,053 right when the host stalled.
-            //
-            // UX-first decision (2026-06-25): retain full context for the
-            // entire game so the host never loses conversational state.
-            // A real game (up to ~5 rounds) peaks around ~40K tokens; with a
-            // 100K trigger compression effectively NEVER fires in normal play.
-            // It only engages for marathon sessions, keeping 60K of recent
-            // context (gentle) and firing BEFORE the hard ceiling so the
-            // session is never force-closed mid-turn ("WS closed by server").
-            //
-            // CRITICAL ENCODING (2026-06-30): `triggerTokens` and
-            // `targetTokens` are int64 in the Gemini Live proto, which the
-            // JSON/proto mapping requires to be sent as STRINGS. Sent as raw
-            // numbers they are silently dropped and the server falls back to
-            // its low default trigger — which is exactly what was happening:
-            // compression fired at ~22-37K mid-game (well below 100K),
-            // injecting 13-15s latency spikes on the turn right after each
-            // compression (debug-f3b222.log 2026-06-29). Context reaching
-            // 37,240 tokens with no force-close confirms the real window is
-            // far above 100K, so the string-encoded trigger keeps compression
-            // dormant for a normal game.
-            setup["contextWindowCompression"] = [
-                "triggerTokens": "100000",
-                "slidingWindow": ["targetTokens": "60000"] as [String: Any]
-            ] as [String: Any]
-
-            if let handle = config.resumptionHandle {
-                setup["sessionResumption"] = ["handle": handle] as [String: Any]
-            } else {
-                setup["sessionResumption"] = [String: Any]()
-            }
-
-            if let cacheName = config.cachedContentName {
-                setup["cachedContent"] = cacheName
-            }
-
-            return ["setup": setup]
+            return ["type": "session.update", "session": session]
 
         case .inputAudioBufferAppend(let audio):
+            return ["type": "input_audio_buffer.append", "audio": audio]
+
+        case .inputAudioBufferClear:
+            return ["type": "input_audio_buffer.clear"]
+
+        case .responseCreate(let instructions):
+            var event: [String: Any] = ["type": "response.create"]
+            if let instructions, !instructions.isEmpty {
+                event["response"] = ["instructions": instructions]
+            }
+            return event
+
+        case .conversationItemCreate(let callId, _, let output):
             return [
-                "realtimeInput": [
+                "type": "conversation.item.create",
+                "item": [
+                    "type": "function_call_output",
+                    "call_id": callId,
+                    "output": output
+                ] as [String: Any]
+            ]
+
+        case .forceMessage(let text, let interruptible):
+            return [
+                "type": "conversation.item.create",
+                "item": [
+                    "type": "force_message",
+                    "role": "assistant",
+                    "interruptible": interruptible,
+                    "content": [
+                        ["type": "output_text", "text": text]
+                    ]
+                ] as [String: Any]
+            ]
+
+        case .transcriptionKeyterms(let terms):
+            return [
+                "type": "session.update",
+                "session": [
                     "audio": [
-                        "data": audio,
-                        "mimeType": "audio/pcm;rate=16000"
+                        "input": [
+                            "transcription": [
+                                "model": "grok-transcribe",
+                                "keyterms": terms
+                            ] as [String: Any]
+                        ] as [String: Any]
                     ] as [String: Any]
                 ] as [String: Any]
             ]
 
-        case .inputAudioBufferClear:
-            return nil
-
-        case .responseCreate(let instructions):
-            guard let instructions else { return nil }
-            return [
-                "realtimeInput": [
-                    "text": instructions
-                ] as [String: Any]
-            ]
-
-        case .conversationItemCreate:
-            return nil
-
         case .responseCancel:
-            return [
-                "realtimeInput": [
-                    "text": "[stop]"
-                ] as [String: Any]
-            ]
+            return ["type": "response.cancel"]
         }
     }
 
@@ -169,31 +138,15 @@ struct SessionConfig {
     let voice: String
     let tools: [RealtimeTool]
     let model: String
-    /// When set, Gemini restores server-side conversation context from a prior session.
+    /// xAI conversation ID used to restore server-side history on reconnect.
     var resumptionHandle: String?
-    /// When set, references a server-side CachedContent resource containing the
-    /// policy block, so only the memory block needs to go in `systemInstruction`.
-    var cachedContentName: String?
 
-    /// Optional Gemini speech config (voice selection).
-    var speechConfig: [String: Any]? {
-        guard !voice.isEmpty else { return nil }
-        return [
-            "voiceConfig": [
-                "prebuiltVoiceConfig": [
-                    "voiceName": voice
-                ]
-            ]
-        ]
-    }
-
-    init(instructions: String, voice: String, tools: [RealtimeTool], model: String = "gemini-3.1-flash-live-preview", resumptionHandle: String? = nil, cachedContentName: String? = nil) {
+    init(instructions: String, voice: String, tools: [RealtimeTool], model: String = "grok-voice-think-fast-2.0", resumptionHandle: String? = nil) {
         self.instructions = instructions
         self.voice = voice
         self.tools = tools
         self.model = model
         self.resumptionHandle = resumptionHandle
-        self.cachedContentName = cachedContentName
     }
 }
 
@@ -202,9 +155,10 @@ struct RealtimeTool {
     let description: String
     let parameters: [String: Any]
 
-    /// Gemini FunctionDeclaration format.
+    /// xAI/OpenAI Realtime function tool format.
     func toDictionary() -> [String: Any] {
         var dict: [String: Any] = [
+            "type": "function",
             "name": name,
             "description": description,
         ]
@@ -215,10 +169,9 @@ struct RealtimeTool {
     }
 }
 
-// MARK: - Server → Client Events (Gemini Live API)
+// MARK: - Server → Client Events (xAI Realtime API)
 
-/// Parsed event received from the Gemini Live API.
-/// Cases mirror the original OpenAI model so the coordinator stays unchanged.
+/// Provider-neutral events consumed by the coordinator and audio service.
 enum RealtimeServerEvent {
     case sessionCreated(sessionId: String)
     case sessionUpdated
@@ -236,128 +189,96 @@ enum RealtimeServerEvent {
     case error(message: String, code: String?)
     case unknown(type: String)
 
-    /// Parse a Gemini `BidiGenerateContentServerMessage` into our internal event model.
+    /// Parse an xAI Realtime server event into the app's existing event model.
     static func parse(from data: Data) -> [RealtimeServerEvent] {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return []
         }
 
-        var events: [RealtimeServerEvent] = []
+        let type = json["type"] as? String ?? "unknown"
+        switch type {
+        case "session.created":
+            let session = json["session"] as? [String: Any]
+            return [.sessionCreated(sessionId: session?["id"] as? String ?? "grok")]
 
-        // 1. Setup complete → treated as session created
-        if json["setupComplete"] != nil {
-            events.append(.sessionCreated(sessionId: "gemini"))
-            return events
-        }
+        case "session.updated":
+            return [.sessionUpdated]
 
-        // 2. Tool calls — emit one event per function call, then a synthetic
-        //    responseDone so the coordinator flushes the batched toolResponse.
-        //    Gemini waits for our toolResponse before continuing (synchronous FC).
-        if let toolCall = json["toolCall"] as? [String: Any],
-           let functionCalls = toolCall["functionCalls"] as? [[String: Any]] {
-            for fc in functionCalls {
-                let callId = fc["id"] as? String ?? UUID().uuidString
-                let name = fc["name"] as? String ?? ""
-                let args = fc["args"] as? [String: Any] ?? [:]
-                let argsString: String
-                if let argsData = try? JSONSerialization.data(withJSONObject: args),
-                   let s = String(data: argsData, encoding: .utf8) {
-                    argsString = s
-                } else {
-                    argsString = "{}"
-                }
-                events.append(.responseFunctionCallArgumentsDone(callId: callId, name: name, arguments: argsString))
+        case "conversation.created":
+            let conversation = json["conversation"] as? [String: Any]
+            guard let id = conversation?["id"] as? String else {
+                return [.unknown(type: type)]
+            }
+            return [.sessionResumptionUpdate(token: id)]
+
+        case "response.output_audio.delta", "response.audio.delta":
+            let responseId = json["response_id"] as? String ?? "grok"
+            guard let audio = json["delta"] as? String ?? json["audio"] as? String else {
+                return [.unknown(type: type)]
+            }
+            return [.responseAudioDelta(responseId: responseId, audio: audio)]
+
+        case "response.output_audio.done", "response.audio.done":
+            return [.responseAudioDone(responseId: json["response_id"] as? String ?? "grok")]
+
+        case "response.output_audio_transcript.delta", "response.audio_transcript.delta":
+            return [.responseAudioTranscriptDone(text: json["delta"] as? String ?? "")]
+
+        case "response.output_audio_transcript.done", "response.audio_transcript.done":
+            return [.responseAudioTranscriptDone(text: json["transcript"] as? String ?? "")]
+
+        case "conversation.item.input_audio_transcription.updated":
+            let text = json["transcript"] as? String ?? json["text"] as? String ?? ""
+            return text.isEmpty ? [] : [.responseAudioTranscriptDelta(text: text)]
+
+        case "conversation.item.input_audio_transcription.completed":
+            let text = json["transcript"] as? String ?? ""
+            return text.isEmpty ? [] : [.responseAudioTranscriptDelta(text: text)]
+
+        case "response.function_call_arguments.done":
+            return [.responseFunctionCallArgumentsDone(
+                callId: json["call_id"] as? String ?? UUID().uuidString,
+                name: json["name"] as? String ?? "",
+                arguments: json["arguments"] as? String ?? "{}"
+            )]
+
+        case "response.done":
+            var events: [RealtimeServerEvent] = []
+            if let response = json["response"] as? [String: Any],
+               let usage = response["usage"] as? [String: Any] {
+                let parsed = ResponseUsage.from(usageDictionary: usage)
+                events.append(.usageMetadata(
+                    promptTokens: parsed.inputTokens,
+                    responseTokens: parsed.outputTokens,
+                    totalTokens: parsed.totalTokens,
+                    raw: usage
+                ))
             }
             events.append(.responseDone)
             return events
+
+        case "input_audio_buffer.speech_started":
+            return [.inputAudioBufferSpeechStarted]
+
+        case "input_audio_buffer.speech_stopped":
+            return [.inputAudioBufferSpeechStopped]
+
+        case "input_audio_buffer.committed":
+            return [.inputAudioBufferCommitted]
+
+        case "response.cancelled":
+            return [.error(message: "Response cancelled", code: "response_cancelled")]
+
+        case "error":
+            let error = json["error"] as? [String: Any]
+            return [.error(
+                message: error?["message"] as? String ?? "Unknown xAI Realtime error",
+                code: error?["code"] as? String ?? error?["type"] as? String
+            )]
+
+        default:
+            return [.unknown(type: type)]
         }
-
-        // 3. Tool call cancellation
-        if let cancellation = json["toolCallCancellation"] as? [String: Any],
-           let ids = cancellation["ids"] as? [String] {
-            for id in ids {
-                events.append(.error(message: "Tool call cancelled: \(id)", code: "tool_call_cancelled"))
-            }
-            return events
-        }
-
-        // 4. Go away notice
-        if json["goAway"] != nil {
-            events.append(.error(message: "Server is closing the connection soon", code: "go_away"))
-            return events
-        }
-
-        // 5. Session resumption update — extract and surface the token
-        if let resumption = json["sessionResumptionUpdate"] as? [String: Any],
-           let handle = resumption["newHandle"] as? String {
-            events.append(.sessionResumptionUpdate(token: handle))
-            return events
-        }
-
-        // 6. Usage metadata (can accompany any message — always check)
-        if let usage = json["usageMetadata"] as? [String: Any] {
-            let prompt = usage["promptTokenCount"] as? Int ?? 0
-            let response = usage["candidatesTokenCount"] as? Int
-                          ?? usage["responseTokenCount"] as? Int ?? 0
-            let total = usage["totalTokenCount"] as? Int ?? (prompt + response)
-            events.append(.usageMetadata(promptTokens: prompt, responseTokens: response,
-                                         totalTokens: total, raw: usage))
-        }
-
-        // 7. Server content
-        if let serverContent = json["serverContent"] as? [String: Any] {
-
-            // Interrupted → equivalent to speech_started (barge-in)
-            if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
-                events.append(.inputAudioBufferSpeechStarted)
-            }
-
-            // Model turn with audio data
-            if let modelTurn = serverContent["modelTurn"] as? [String: Any],
-               let parts = modelTurn["parts"] as? [[String: Any]] {
-                for part in parts {
-                    if let inlineData = part["inlineData"] as? [String: Any],
-                       let audioBase64 = inlineData["data"] as? String {
-                        events.append(.responseAudioDelta(responseId: "gemini", audio: audioBase64))
-                    }
-                }
-            }
-
-            // Input transcription
-            if let inputTranscription = serverContent["inputTranscription"] as? [String: Any],
-               let text = inputTranscription["text"] as? String, !text.isEmpty {
-                events.append(.responseAudioTranscriptDelta(text: text))
-            }
-
-            // Output transcription
-            if let outputTranscription = serverContent["outputTranscription"] as? [String: Any],
-               let text = outputTranscription["text"] as? String, !text.isEmpty {
-                events.append(.responseAudioTranscriptDone(text: text))
-            }
-
-            // Generation complete (audio stream done for this turn)
-            if let genComplete = serverContent["generationComplete"] as? Bool, genComplete {
-                events.append(.responseAudioDone(responseId: "gemini"))
-            }
-
-            // Turn complete → equivalent to response.done
-            if let turnComplete = serverContent["turnComplete"] as? Bool, turnComplete {
-                if !events.contains(where: {
-                    if case .responseAudioDone = $0 { return true }
-                    return false
-                }) {
-                    events.append(.responseAudioDone(responseId: "gemini"))
-                }
-                events.append(.responseDone)
-            }
-        }
-
-        if events.isEmpty {
-            let keys = Array(json.keys).joined(separator: ", ")
-            events.append(.unknown(type: "gemini:\(keys)"))
-        }
-
-        return events
     }
 
     /// Legacy single-event parser for backward compatibility where needed.
@@ -395,6 +316,20 @@ struct EndGameArgs: Codable {
 
 // MARK: - Token Response
 
+struct GrokTokenResponse: Codable {
+    let value: String
+    let expiresAt: Int
+    let model: String
+
+    enum CodingKeys: String, CodingKey {
+        case value
+        case expiresAt = "expires_at"
+        case model
+    }
+}
+
+/// Still used by the Gemini REST question-batch service. Live voice no longer
+/// consumes this long-lived key.
 struct GeminiTokenResponse: Codable {
     let apiKey: String
     let model: String

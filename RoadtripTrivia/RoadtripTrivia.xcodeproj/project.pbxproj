@@ -27,8 +27,8 @@
 		A20004 /* AudioStreamingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20004 /* AudioStreamingService.swift */; };
 		A20005 /* SystemPromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20005 /* SystemPromptBuilder.swift */; };
 		A20006 /* APIUsageLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20006 /* APIUsageLogger.swift */; };
-		A20007 /* GeminiCacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20007 /* GeminiCacheService.swift */; };
 		A20008 /* QuestionBatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20008 /* QuestionBatchService.swift */; };
+		A20026 /* TranscriptionKeytermsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20026 /* TranscriptionKeytermsBuilder.swift */; };
 		A20009 /* AnswerGrader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20009 /* AnswerGrader.swift */; };
 		A20010 /* FarewellScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20010 /* FarewellScript.swift */; };
 		A20011 /* PostScoreWatchdogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20011 /* PostScoreWatchdogPolicy.swift */; };
@@ -80,8 +80,8 @@
 		B20004 /* AudioStreamingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStreamingService.swift; sourceTree = "<group>"; };
 		B20005 /* SystemPromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPromptBuilder.swift; sourceTree = "<group>"; };
 		B20006 /* APIUsageLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIUsageLogger.swift; sourceTree = "<group>"; };
-		B20007 /* GeminiCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCacheService.swift; sourceTree = "<group>"; };
 		B20008 /* QuestionBatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionBatchService.swift; sourceTree = "<group>"; };
+		B20026 /* TranscriptionKeytermsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionKeytermsBuilder.swift; sourceTree = "<group>"; };
 		B20009 /* AnswerGrader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerGrader.swift; sourceTree = "<group>"; };
 		B20010 /* FarewellScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarewellScript.swift; sourceTree = "<group>"; };
 		B20011 /* PostScoreWatchdogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostScoreWatchdogPolicy.swift; sourceTree = "<group>"; };
@@ -235,6 +235,7 @@
 				B20023 /* VerdictLineComposer.swift */,
 				B20024 /* RoundIntroComposer.swift */,
 				B20025 /* NoAnswerGuardPolicy.swift */,
+				B20026 /* TranscriptionKeytermsBuilder.swift */,
 			);
 			path = Logic;
 			sourceTree = "<group>";
@@ -320,7 +321,6 @@
 				B20004 /* AudioStreamingService.swift */,
 				B20005 /* SystemPromptBuilder.swift */,
 				B20006 /* APIUsageLogger.swift */,
-				B20007 /* GeminiCacheService.swift */,
 				B20008 /* QuestionBatchService.swift */,
 			);
 			path = Realtime;
@@ -432,7 +432,6 @@
 				A20004 /* AudioStreamingService.swift in Sources */,
 				A20005 /* SystemPromptBuilder.swift in Sources */,
 				A20006 /* APIUsageLogger.swift in Sources */,
-				A20007 /* GeminiCacheService.swift in Sources */,
 				A20008 /* QuestionBatchService.swift in Sources */,
 				A20009 /* AnswerGrader.swift in Sources */,
 				A20010 /* FarewellScript.swift in Sources */,
@@ -451,6 +450,7 @@
 				A20023 /* VerdictLineComposer.swift in Sources */,
 				A20024 /* RoundIntroComposer.swift in Sources */,
 				A20025 /* NoAnswerGuardPolicy.swift in Sources */,
+				A20026 /* TranscriptionKeytermsBuilder.swift in Sources */,
 				D7D30EEF2F75A1C300D76E6F /* PaywallViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

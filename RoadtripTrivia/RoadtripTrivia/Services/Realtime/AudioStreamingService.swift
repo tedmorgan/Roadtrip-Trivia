@@ -236,6 +236,23 @@ class AudioStreamingService: ObservableObject {
         print("[Audio] Streaming stopped")
     }
 
+    /// Wait until streamed response audio has finished playing before asking
+    /// Grok to continue after a tool result. This prevents adjacent model
+    /// turns from overlapping in the car speakers.
+    func waitForPlaybackToDrain(timeout: TimeInterval = 12) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            bufferLock.lock()
+            let pending = scheduledBufferCount
+            bufferLock.unlock()
+            if pending == 0 && !isPlayingResponse {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        print("[Audio] Playback-drain wait timed out after \(timeout)s")
+    }
+
     // MARK: - Mic Gating
 
     private func muteMic(reason: String = "") {

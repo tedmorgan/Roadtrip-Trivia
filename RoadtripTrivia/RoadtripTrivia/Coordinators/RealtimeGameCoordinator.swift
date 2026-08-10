@@ -1062,7 +1062,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 inputTextTokens: nil, inputAudioTokens: nil, inputImageTokens: nil,
                 cachedInputTokens: nil, cachedInputTextTokens: nil, cachedInputAudioTokens: nil,
                 cachedInputImageTokens: nil, outputTextTokens: nil, outputAudioTokens: nil, outputImageTokens: nil)
-            apiLogger.logResponseDone(status: "gemini_turn", usage: usage)
+            apiLogger.logResponseDone(status: "grok_turn", usage: usage)
 
         case .error(let message, let code):
             print("[RealtimeGame] Error [\(code ?? "?")]: \(message)")
@@ -2176,6 +2176,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 audioService.suspendMicForProcessing()
                 Task {
                     do {
+                        await self.audioService.waitForPlaybackToDrain()
                         try await self.sessionManager.submitFunctionResult(
                             callId: callId,
                             result: [
@@ -2184,9 +2185,6 @@ class RealtimeGameCoordinator: ObservableObject {
                             ],
                             name: name
                         )
-                        try? await self.sessionManager.send(.responseCreate(
-                            instructions: "Call report_score for the previous question immediately, then call get_next_question again."
-                        ))
                     } catch {
                         print("[RealtimeGame] Failed to submit SCORE_PENDING result: \(error)")
                     }
@@ -2353,6 +2351,12 @@ class RealtimeGameCoordinator: ObservableObject {
             lastGetNextQuestionCallId = callId
             lastServedQuestionResult = result
             lastQuestionServedAt = Date()
+            updateTranscriptionKeyterms(
+                questionText: next.question.questionText,
+                options: next.question.options,
+                correctAnswer: next.question.correctAnswer,
+                category: next.round.category
+            )
             // Answer window is CLOSED until the host finishes reading this
             // freshly-served question (reopened on the next responseAudioDone).
             answerWindowOpenedAt = nil
@@ -2444,6 +2448,7 @@ class RealtimeGameCoordinator: ObservableObject {
             audioService.suspendMicForProcessing()
             Task {
                 do {
+                    await self.audioService.waitForPlaybackToDrain()
                     try await self.sessionManager.submitFunctionResult(
                         callId: callId,
                         result: [
@@ -2452,9 +2457,6 @@ class RealtimeGameCoordinator: ObservableObject {
                         ],
                         name: name
                     )
-                    try? await self.sessionManager.send(.responseCreate(
-                        instructions: "Ask the player if they want to continue with the next round. When they agree, call get_next_question to begin it."
-                    ))
                 } catch {
                     print("[RealtimeGame] Failed to submit ROUNDS_REMAIN result: \(error)")
                 }
@@ -2467,6 +2469,7 @@ class RealtimeGameCoordinator: ObservableObject {
             audioService.suspendMicForProcessing()
             Task {
                 do {
+                    await self.audioService.waitForPlaybackToDrain()
                     try await self.sessionManager.submitFunctionResult(
                         callId: callId,
                         result: [
@@ -2475,9 +2478,6 @@ class RealtimeGameCoordinator: ObservableObject {
                         ],
                         name: name
                     )
-                    try? await self.sessionManager.send(.responseCreate(
-                        instructions: "Ask the player if they want to continue with the next round or stop playing. If they continue, call get_next_question. If they confirm stopping, call end_game again."
-                    ))
                 } catch {
                     print("[RealtimeGame] Failed to submit ROUNDS_REMAIN result: \(error)")
                 }
@@ -2999,6 +2999,8 @@ class RealtimeGameCoordinator: ObservableObject {
         Task { @MainActor in
             do {
                 try await sessionManager.queueFunctionResult(callId: callId, result: result, name: name)
+                await audioService.waitForPlaybackToDrain()
+                try await sessionManager.flushPendingResults()
                 if let wrap = pendingLightningFlushInstructions, sessionManager.hasPendingResults {
                     pendingLightningFlushInstructions = nil
                     // #region agent log
@@ -3018,6 +3020,7 @@ class RealtimeGameCoordinator: ObservableObject {
         lastToolEventAt = Date()
         Task {
             do {
+                await audioService.waitForPlaybackToDrain()
                 try await sessionManager.submitFunctionResult(callId: callId, result: result, name: name)
             } catch {
                 print("[RealtimeGame] Failed to submit function result: \(error)")
@@ -3029,6 +3032,10 @@ class RealtimeGameCoordinator: ObservableObject {
     private func flushPendingResults() {
         Task { @MainActor in
             do {
+                // xAI can finish producing a response before its final audio
+                // buffers have played locally. Do not start the tool follow-up
+                // until the current host utterance has drained.
+                await audioService.waitForPlaybackToDrain()
                 let merge = pendingLightningFlushInstructions
                 let hasP = sessionManager.hasPendingResults
 
@@ -3689,8 +3696,8 @@ class RealtimeGameCoordinator: ObservableObject {
         sendNextFarewellChunk(reason: "initial")
     }
 
-    /// Sends the next script in `farewellChain` as a `responseCreate`
-    /// (one short turn for the AI to speak). No-op if the chain is done.
+    /// Sends the next farewell line via xAI `force_message` (verbatim TTS).
+    /// No-op if the chain is done.
     private func sendNextFarewellChunk(reason: String) {
         guard pendingNoRoundsEnd else { return }
         guard farewellChainIndex < farewellChain.count else {
@@ -3701,20 +3708,17 @@ class RealtimeGameCoordinator: ObservableObject {
         }
         let idx = farewellChainIndex
         let chunk = farewellChain[idx]
-        let instruction = chunk.instruction
+        let spoken = chunk.spokenText
         farewellChainIndex += 1
 
         // #region agent log
-        _dbg("NO_ROUNDS_END","RealtimeGameCoordinator.swift:\(#line)","sending farewell chunk",["reason":reason,"step":idx + 1,"of":farewellChain.count,"chars":instruction.count])
+        _dbg("NO_ROUNDS_END","RealtimeGameCoordinator.swift:\(#line)","sending farewell force_message",["reason":reason,"step":idx + 1,"of":farewellChain.count,"chars":spoken.count])
         // #endregion
 
         farewellChunkAudioStarted = false
 
-        // Per-chunk timeout: if Gemini never sends `responseAudioDone`
-        // for this chunk (debug-f3b222 4.log, 2026-05-07: chunk 3's
-        // real done event never arrived, chain stalled, WS closed by
-        // server → farewell cut off), force advancement so the player
-        // at least gets the silence-based auto-end.
+        // Per-chunk timeout: if no `responseAudioDone` arrives, speak the
+        // same line locally and advance so the CTA/goodbye are never dropped.
         farewellChunkTimeoutWork?.cancel()
         let timeoutItem = DispatchWorkItem { [weak self] in
             guard let self, self.pendingNoRoundsEnd else { return }
@@ -3727,9 +3731,6 @@ class RealtimeGameCoordinator: ObservableObject {
             // #region agent log
             _dbg("NO_ROUNDS_END","RealtimeGameCoordinator.swift:\(#line)","chunk timeout fired — forcing advancement",["chainIndex":self.farewellChainIndex,"chainCount":self.farewellChain.count,"chunkAudioStarted":self.farewellChunkAudioStarted,"action":"\(action)"])
             // #endregion
-            // Guaranteed delivery: the model never spoke this chunk, so the
-            // app says the fallback line itself via local TTS. The purchase
-            // CTA and goodbye can no longer be silently dropped.
             if !self.farewellChunkAudioStarted {
                 let failedIndex = max(0, self.farewellChainIndex - 1)
                 if failedIndex < self.farewellChain.count {
@@ -3752,13 +3753,31 @@ class RealtimeGameCoordinator: ObservableObject {
         farewellChunkTimeoutWork = timeoutItem
         DispatchQueue.main.asyncAfter(deadline: .now() + farewellChunkTimeoutSeconds, execute: timeoutItem)
 
-        // We rely on `farewellChunkAudioStarted` to gate progression on
-        // real audio delivery; this delay is just a natural sentence
-        // beat between farewell sentences so they don't sound clipped.
+        // Natural sentence beat between farewell lines.
         let delayNs: UInt64 = (idx == 0) ? 300_000_000 : 800_000_000
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: delayNs)
-            try? await self?.sessionManager.send(.responseCreate(instructions: instruction))
+            // force_message IS the turn — do not send response.create after it.
+            try? await self?.sessionManager.send(.forceMessage(text: spoken, interruptible: false))
+        }
+    }
+
+    /// Bias Grok ASR toward the current question's answer vocabulary.
+    private func updateTranscriptionKeyterms(
+        questionText: String?,
+        options: [String]?,
+        correctAnswer: String?,
+        category: String?
+    ) {
+        let terms = TranscriptionKeytermsBuilder.build(
+            questionText: questionText,
+            options: options,
+            correctAnswer: correctAnswer,
+            category: category
+        )
+        guard !terms.isEmpty else { return }
+        Task { [weak self] in
+            try? await self?.sessionManager.send(.transcriptionKeyterms(terms))
         }
     }
 

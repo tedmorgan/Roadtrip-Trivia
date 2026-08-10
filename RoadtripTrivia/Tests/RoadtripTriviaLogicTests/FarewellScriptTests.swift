@@ -21,7 +21,7 @@ final class FarewellScriptTests: XCTestCase {
             roundsPlayed: 2,
             context: "round_limit_reached"
         )
-        for (i, chunk) in chain.map({ $0.instruction }).enumerated() {
+        for (i, chunk) in chain.map({ $0.spokenText }).enumerated() {
             XCTAssertFalse(chunk.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                            "chunk \(i) must not be empty")
         }
@@ -35,7 +35,7 @@ final class FarewellScriptTests: XCTestCase {
             roundsPlayed: 3,
             context: "round_limit_reached"
         )
-        let summary = chain[0].instruction
+        let summary = chain[0].spokenText
         XCTAssertTrue(summary.contains("14 points"),
                       "summary chunk must announce the literal final score")
         XCTAssertTrue(summary.contains("3 round"),
@@ -48,7 +48,7 @@ final class FarewellScriptTests: XCTestCase {
             roundsPlayed: 1,
             context: "round_limit_reached"
         )
-        let summary = chain[0].instruction
+        let summary = chain[0].spokenText
         XCTAssertTrue(summary.contains("1 round."),
                       "1 round must be singular (no plural 's')")
         XCTAssertFalse(summary.contains("1 rounds"),
@@ -61,7 +61,7 @@ final class FarewellScriptTests: XCTestCase {
             roundsPlayed: 0,
             context: "round_limit_reached"
         )
-        let summary = chain[0].instruction
+        let summary = chain[0].spokenText
         XCTAssertFalse(summary.contains("0 round"),
                        "do not announce '0 rounds'")
         XCTAssertTrue(summary.contains("0 points"))
@@ -70,15 +70,12 @@ final class FarewellScriptTests: XCTestCase {
     // MARK: - Purchase guidance — the 8.log regression
 
     func test_purchaseChunkExplicitlyMentionsBuyingMoreRounds() {
-        // This is the exact bug from `mic_gating 8.log`: the purchase
-        // guidance got cut off, leaving the player without instructions
-        // for how to keep playing. The chunk MUST contain the explicit CTA.
         let chain = FarewellScript.makeNoRoundsChain(
             finalScore: 10,
             roundsPlayed: 3,
             context: "round_limit_reached"
         )
-        let purchase = chain[1].instruction.lowercased()
+        let purchase = chain[1].spokenText.lowercased()
         XCTAssertTrue(
             purchase.contains("purchase") || purchase.contains("grab") || purchase.contains("get more") || purchase.contains("buy"),
             "purchase chunk must tell the player how to get more rounds"
@@ -97,76 +94,44 @@ final class FarewellScriptTests: XCTestCase {
             roundsPlayed: 3,
             context: "round_limit_reached"
         )
-        let goodbye = chain[2].instruction.lowercased()
+        let goodbye = chain[2].spokenText.lowercased()
         XCTAssertTrue(
             goodbye.contains("thank") || goodbye.contains("playing")
                 || goodbye.contains("farewell") || goodbye.contains("goodbye")
-                || goodbye.contains("bye") || goodbye.contains("warm"),
+                || goodbye.contains("bye") || goodbye.contains("come back"),
             "goodbye chunk must thank the player or wish them farewell"
         )
     }
 
-    // MARK: - Anti-tool-call instructions
+    // MARK: - force_message payload is speakable (not LLM meta-instructions)
 
-    func test_eachChunkExplicitlyForbidsToolCalls() {
-        // Regression guard: previously the AI would call `end_game` or
-        // `get_next_question` mid-farewell, breaking the chain. Every
-        // chunk must include an explicit "do not call any tools".
+    func test_spokenTextIsPlainSpeech_notMetaInstructions() {
         let chain = FarewellScript.makeNoRoundsChain(
-            finalScore: 10,
-            roundsPlayed: 3,
-            context: "round_limit_reached"
+            finalScore: 10, roundsPlayed: 3, context: "round_limit_reached"
         )
-        for (i, chunk) in chain.map({ $0.instruction }).enumerated() {
-            let lower = chunk.lowercased()
-            XCTAssertTrue(
-                lower.contains("do not call") || lower.contains("no tools"),
-                "chunk \(i) must forbid tool calls; chunk text: \(chunk)"
-            )
+        for (i, chunk) in chain.enumerated() {
+            let lower = chunk.spokenText.lowercased()
+            XCTAssertFalse(lower.contains("do not call"),
+                           "chunk \(i) must be speakable text for force_message, not a prompt")
+            XCTAssertFalse(lower.contains("one short"),
+                           "chunk \(i) must be speakable text for force_message, not a prompt")
+            XCTAssertEqual(chunk.spokenText, chunk.fallbackSpeech)
+            XCTAssertEqual(chunk.spokenText, chunk.instruction)
         }
     }
 
     // MARK: - No template placeholders leak through
 
     func test_chainContainsNoUnsubstitutedPlaceholders() {
-        // Catches accidental "\(finalScore)"-style template leakage.
         let chain = FarewellScript.makeNoRoundsChain(
             finalScore: 7,
             roundsPlayed: 2,
             context: "round_limit_reached"
         )
-        for (i, chunk) in chain.map({ $0.instruction }).enumerated() {
+        for (i, chunk) in chain.map({ $0.spokenText }).enumerated() {
             XCTAssertFalse(chunk.contains("\\("), "chunk \(i) leaks an interpolation marker")
             XCTAssertFalse(chunk.contains("{{"), "chunk \(i) leaks a template marker")
             XCTAssertFalse(chunk.contains("}}"), "chunk \(i) leaks a template marker")
-        }
-    }
-
-    // MARK: - Local TTS fallback lines
-
-    func test_everyChunkHasNonEmptyFallbackSpeech() {
-        // The fallback line is what the app itself speaks (AVSpeechSynthesizer)
-        // when the model never produces audio for a chunk. It must always exist
-        // so the farewell + purchase CTA can never be silently dropped.
-        let chain = FarewellScript.makeNoRoundsChain(
-            finalScore: 10, roundsPlayed: 3, context: "round_limit_reached"
-        )
-        for (i, chunk) in chain.enumerated() {
-            XCTAssertFalse(chunk.fallbackSpeech.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                           "chunk \(i) needs a fallback speech line")
-        }
-    }
-
-    func test_fallbackSpeechIsPlainSpeech_notMetaInstructions() {
-        let chain = FarewellScript.makeNoRoundsChain(
-            finalScore: 10, roundsPlayed: 3, context: "round_limit_reached"
-        )
-        for (i, chunk) in chain.enumerated() {
-            let lower = chunk.fallbackSpeech.lowercased()
-            XCTAssertFalse(lower.contains("do not call"),
-                           "chunk \(i) fallback must be speakable text, not prompt instructions")
-            XCTAssertFalse(lower.contains("one short"),
-                           "chunk \(i) fallback must be speakable text, not prompt instructions")
         }
     }
 

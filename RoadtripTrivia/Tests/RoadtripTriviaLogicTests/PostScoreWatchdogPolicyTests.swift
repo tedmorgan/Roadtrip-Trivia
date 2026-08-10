@@ -180,18 +180,73 @@ final class PostScoreWatchdogPolicyTests: XCTestCase {
     }
 
     func test_toolQuietWindowIsConfigurable() {
+        // The tool-quiet window only gates the `.armed` path, so exercise
+        // its configurability there.
         let action = PostScoreWatchdogPolicy.decide(
             sessionAlive: true,
             pendingNoRoundsEnd: false,
             phase: .listening,
             secondsSinceLastAudioDelta: .infinity,
-            reason: .continuation,
+            reason: .armed,
             secondsSinceLastToolEvent: 8.0,
             toolQuietWindowSeconds: 10.0
         )
         if case .reArm = action { } else {
             XCTFail("with 10s window and 8s gap, should re-arm")
         }
+    }
+
+    /// THE 2026-07-31 DEAD-AIR REGRESSION (R2Q3→Q4 / R3Q3→Q4 / R3Q4→Q5).
+    /// The tool-quiet window was gating BOTH post-score reasons. In the
+    /// `.continuation` window — reached only AFTER `responseAudioDone`, i.e.
+    /// the verdict turn already completed — the `report_score` tool event is
+    /// still only ~5-11s old, so the 12s window kept re-arming ("model is
+    /// composing") until ~16s, producing ~11-14s of dead air before the
+    /// host was nudged to call `get_next_question`. Since the verdict
+    /// response has completed, there is nothing in-flight to orphan, so the
+    /// tool-quiet gate must NOT apply to `.continuation`: fire soft as soon
+    /// as audio is quiet.
+    func test_continuationFiresAfterVerdictDespiteRecentScore() {
+        for toolGap in [5.0, 8.0, 11.0] {
+            let action = PostScoreWatchdogPolicy.decide(
+                sessionAlive: true,
+                pendingNoRoundsEnd: false,
+                phase: .listening,
+                secondsSinceLastAudioDelta: 2.5, // verdict audio done, quiet
+                reason: .continuation,
+                secondsSinceLastToolEvent: toolGap // report_score still recent
+            )
+            XCTAssertEqual(action, .fireSoft,
+                           "continuation must fire once audio is quiet — the verdict turn completed, so a recent report_score (\(toolGap)s) must not block the get_next_question nudge")
+        }
+    }
+
+    /// Guards the asymmetry directly: an identical recent tool gap re-arms
+    /// for `.armed` (freeze protection) but fires for `.continuation`
+    /// (no in-flight generation to protect).
+    func test_toolQuietGateAppliesToArmedButNotContinuation() {
+        let armed = PostScoreWatchdogPolicy.decide(
+            sessionAlive: true,
+            pendingNoRoundsEnd: false,
+            phase: .listening,
+            secondsSinceLastAudioDelta: 2.5,
+            reason: .armed,
+            secondsSinceLastToolEvent: 6.0
+        )
+        if case .reArm = armed { } else {
+            XCTFail("armed with a 6s tool gap must re-arm (freeze protection), got \(armed)")
+        }
+
+        let continuation = PostScoreWatchdogPolicy.decide(
+            sessionAlive: true,
+            pendingNoRoundsEnd: false,
+            phase: .listening,
+            secondsSinceLastAudioDelta: 2.5,
+            reason: .continuation,
+            secondsSinceLastToolEvent: 6.0
+        )
+        XCTAssertEqual(continuation, .fireSoft,
+                       "continuation with the same 6s tool gap must fire — verdict already completed")
     }
 
     func test_noToolActivityEverStillFires() {

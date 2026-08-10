@@ -1,7 +1,8 @@
 import Foundation
 
-/// Logs only Realtime `response.done` token usage (including text/audio/cached breakdown when present)
-/// to a file in the app's Documents directory for cost review.
+/// Logs Realtime `response.done` usage (token breakdown when present) for
+/// cost review. Grok Voice bills primarily by audio minute ($0.08/min for
+/// Think Fast 2.0); token fields remain useful for diagnosing recovery spend.
 ///
 /// Log file location: Documents/api_usage.log
 /// Access via: Files.app → On My iPhone → Roadtrip Trivia, or Xcode → Devices → Download Container

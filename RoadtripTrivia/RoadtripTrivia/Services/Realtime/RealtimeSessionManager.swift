@@ -12,8 +12,8 @@ private func _dbgWS(_ loc: String, _ msg: String, _ data: [String: Any] = [:]) {
 }
 // #endregion
 
-/// Manages the WebSocket connection to the Gemini Live API.
-/// Handles API key retrieval (via Supabase), connection lifecycle,
+/// Manages the WebSocket connection to the xAI Grok Voice Realtime API.
+/// Handles ephemeral-token retrieval (via Supabase), connection lifecycle,
 /// audio streaming, and event dispatch.
 class RealtimeSessionManager: NSObject, ObservableObject {
 
@@ -24,19 +24,19 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
     // MARK: - Event Stream
 
-    /// All parsed events from the Gemini Live API.
+    /// All parsed events from the xAI Realtime API.
     let eventPublisher = PassthroughSubject<RealtimeServerEvent, Never>()
 
     // MARK: - Configuration
 
     private let supabaseURL = "https://kakhzbcuudkrrktkobjs.supabase.co/functions/v1"
-    private let geminiWSBase = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    private let grokWSBase = "wss://api.x.ai/v1/realtime"
 
     // MARK: - Internal State
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession!
-    private var currentVoice: String = "Puck"
+    private var currentVoice: String = "eve"
     private var currentSessionConfig: SessionConfig?
     private var isReceiving = false
     private var isReconnecting = false
@@ -52,6 +52,11 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
     /// Buffered tool responses waiting to be sent as a batch.
     private var pendingToolResponses: [(id: String, name: String, result: [String: Any])] = []
+    /// xAI can emit parallel tool calls. Continue only after response.done has
+    /// arrived and every call in that response has a corresponding output.
+    private var outstandingToolCallIds = Set<String>()
+    private var toolCallResponseTurnFinished = false
+    private var pendingContinuationInstructions: String?
 
     /// Captures the close reason when the WebSocket is terminated by the server
     /// so `waitForSetupComplete` can fail fast instead of waiting for timeout.
@@ -64,12 +69,8 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     private var consecutiveSendFailures = 0
     private let maxConsecutiveSendFailures = 3
 
-    /// Most recent session resumption token from Gemini. Used to restore
-    /// server-side conversation context on reconnect.
+    /// xAI conversation ID used to restore server-side context on reconnect.
     private(set) var lastResumptionToken: String?
-
-    /// Most recent API key, retained for cache cleanup on disconnect.
-    private var lastApiKey: String?
 
     /// Timer for sending periodic WebSocket keepalive pings.
     private var pingTimer: DispatchSourceTimer?
@@ -86,7 +87,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
     // MARK: - Public API
 
-    /// Full connection flow: fetch API key → (optionally cache policy) → connect WebSocket → send setup.
+    /// Full connection flow: fetch ephemeral token → connect WebSocket → configure session.
     func connect(sessionConfig: SessionConfig) async throws {
         connectionError = nil
         earlyCloseReason = nil
@@ -98,38 +99,22 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         hasEmittedDisconnectEvent = false
         currentVoice = sessionConfig.voice
 
-        var config = sessionConfig
+        let config = sessionConfig
+        print("[Realtime] ── Starting Grok Voice connection flow ──")
 
-        print("[Realtime] ── Starting Gemini connection flow ──")
-
-        // Step 1: Get API key from Supabase
-        let apiKey = try await fetchGeminiApiKey()
-        lastApiKey = apiKey
-
-        // Step 2: Attempt to cache the policy block (no-op when disabled)
-        if config.cachedContentName == nil {
-            let policyBlock = SystemPromptBuilder.buildPolicyBlock()
-            if let cacheName = await GeminiCacheService.shared.ensureCache(
-                policyText: policyBlock, model: config.model, apiKey: apiKey
-            ) {
-                config.cachedContentName = cacheName
-                let memoryOnly = SystemPromptBuilder.buildMemoryBlock(locationLabel: nil)
-                print("[Realtime] Policy block cached — instructions reduced from \(config.instructions.count) to \(memoryOnly.count) chars")
-            }
-        }
-
+        let token = try await fetchGrokEphemeralToken()
         currentSessionConfig = config
-
-        // Step 3: Connect WebSocket
-        try await connectWebSocket(apiKey: apiKey)
-
-        // Step 4: Send setup message (must be first message)
+        try await connectWebSocket(
+            token: token.value,
+            model: config.model,
+            conversationId: config.resumptionHandle
+        )
         try await sendSetup(config)
 
-        print("[Realtime] Gemini session configured — ready for conversation")
+        print("[Realtime] Grok Voice session configured — ready for conversation")
     }
 
-    /// Send a client event to the Gemini Live API.
+    /// Send a client event to Grok Voice.
     func send(_ event: RealtimeClientEvent) async throws {
         guard let ws = webSocketTask else {
             throw RealtimeError.notConnected
@@ -142,16 +127,16 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         }
 
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let keys = Array(json.keys).joined(separator: ", ")
-            if !keys.contains("realtimeInput") {
-                print("[Realtime] Sending: \(keys)")
+            let type = json["type"] as? String ?? Array(json.keys).joined(separator: ", ")
+            if type != "input_audio_buffer.append" {
+                print("[Realtime] Sending: \(type)")
             }
         }
 
         try await ws.send(.string(jsonString))
     }
 
-    /// Send base64-encoded PCM16 audio to the API (16kHz for Gemini).
+    /// Send base64-encoded PCM16 audio to the API at 16 kHz.
     func sendAudio(_ base64Audio: String) async throws {
         do {
             try await send(.inputAudioBufferAppend(audio: base64Audio))
@@ -180,12 +165,11 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         isConnected = false
         currentSessionConfig = nil
         pendingToolResponses.removeAll()
+        outstandingToolCallIds.removeAll()
+        toolCallResponseTurnFinished = false
+        pendingContinuationInstructions = nil
         if !preserveResumptionToken {
             lastResumptionToken = nil
-            if let key = lastApiKey {
-                GeminiCacheService.shared.invalidate(apiKey: key)
-            }
-            lastApiKey = nil
         }
         print("[Realtime] Disconnected (preserveToken=\(preserveResumptionToken))")
     }
@@ -193,44 +177,47 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     /// Submit a function call result AND immediately trigger model continuation.
     /// Used for cases needing the LLM to respond right away (end_game, hint denial).
     func submitFunctionResult(callId: String, result: [String: Any], name: String = "") async throws {
-        let response = buildToolResponse(id: callId, name: name, result: result)
-        try await sendRawJSON(response)
+        try await queueFunctionResult(callId: callId, result: result, name: name)
+        try await flushPendingResults()
     }
 
     /// Queue a function call result WITHOUT sending yet.
     /// Call flushPendingResults() to send all queued results as one toolResponse.
     func queueFunctionResult(callId: String, result: [String: Any], name: String = "") async throws {
         pendingToolResponses.append((id: callId, name: name, result: result))
+        outstandingToolCallIds.remove(callId)
         hasPendingResults = true
     }
 
-    /// Send all queued tool responses as a single `toolResponse` message.
-    /// If `instructions` is set, follow with a `realtimeInput.text` message.
+    /// Send all queued function outputs, then request one continuation after
+    /// every output is present in the conversation.
     func flushPendingResults(instructions: String? = nil) async throws {
+        if let instructions {
+            pendingContinuationInstructions = instructions
+        }
+        guard toolCallResponseTurnFinished, outstandingToolCallIds.isEmpty else {
+            return
+        }
+
         let hadPending = hasPendingResults
         let responses = pendingToolResponses
         pendingToolResponses.removeAll()
         if hadPending { hasPendingResults = false }
+        let continuationInstructions = pendingContinuationInstructions
+        pendingContinuationInstructions = nil
 
-        if !responses.isEmpty {
-            let functionResponses = responses.map { resp -> [String: Any] in
-                [
-                    "id": resp.id,
-                    "name": resp.name,
-                    "response": ["result": resp.result]
-                ] as [String: Any]
-            }
-            let message: [String: Any] = [
-                "toolResponse": [
-                    "functionResponses": functionResponses
-                ]
-            ]
-            try await sendRawJSON(message)
+        for response in responses {
+            try await sendRawJSON(buildToolResponse(
+                id: response.id,
+                name: response.name,
+                result: response.result
+            ))
         }
 
-        if let instructions {
-            try await send(.responseCreate(instructions: instructions))
+        if !responses.isEmpty || continuationInstructions != nil {
+            try await send(.responseCreate(instructions: continuationInstructions))
         }
+        toolCallResponseTurnFinished = false
     }
 
     private(set) var hasPendingResults = false
@@ -249,10 +236,10 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         try await ws.send(.string(jsonString))
     }
 
-    // MARK: - Gemini API Key
+    // MARK: - xAI Ephemeral Token
 
-    private func fetchGeminiApiKey() async throws -> String {
-        guard let url = URL(string: "\(supabaseURL)/gemini-token") else {
+    private func fetchGrokEphemeralToken() async throws -> GrokTokenResponse {
+        guard let url = URL(string: "\(supabaseURL)/grok-token") else {
             throw RealtimeError.invalidURL
         }
 
@@ -260,9 +247,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        print("[Realtime] Fetching Gemini API key...")
+        print("[Realtime] Fetching Grok ephemeral token...")
         // #region agent log
-        _dbgWS("RSM:fetchKey", "H1: fetching API key", ["url": "\(supabaseURL)/gemini-token"])
+        _dbgWS("RSM:fetchKey", "H1: fetching ephemeral token", ["url": "\(supabaseURL)/grok-token"])
         // #endregion
         let (data, response) = try await urlSession.data(for: request)
 
@@ -274,21 +261,25 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             throw RealtimeError.tokenFetchFailed("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0): \(body)")
         }
 
-        let tokenResponse = try JSONDecoder().decode(GeminiTokenResponse.self, from: data)
+        let tokenResponse = try JSONDecoder().decode(GrokTokenResponse.self, from: data)
         // #region agent log
-        _dbgWS("RSM:fetchKey", "H1/H3: API key obtained", ["model": tokenResponse.model, "keyPrefix": String(tokenResponse.apiKey.prefix(8))])
+        _dbgWS("RSM:fetchKey", "H1/H3: ephemeral token obtained", ["model": tokenResponse.model, "expiresAt": tokenResponse.expiresAt])
         // #endregion
-        print("[Realtime] Gemini API key obtained (model: \(tokenResponse.model))")
-        return tokenResponse.apiKey
+        print("[Realtime] Grok ephemeral token obtained (model: \(tokenResponse.model))")
+        return tokenResponse
     }
 
     // MARK: - WebSocket Connection
 
-    private func connectWebSocket(apiKey: String) async throws {
-        guard var components = URLComponents(string: geminiWSBase) else {
+    private func connectWebSocket(token: String, model: String, conversationId: String?) async throws {
+        guard var components = URLComponents(string: grokWSBase) else {
             throw RealtimeError.invalidURL
         }
-        components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+        var queryItems = [URLQueryItem(name: "model", value: model)]
+        if let conversationId, !conversationId.isEmpty {
+            queryItems.append(URLQueryItem(name: "conversation_id", value: conversationId))
+        }
+        components.queryItems = queryItems
 
         guard let url = components.url else {
             throw RealtimeError.invalidURL
@@ -296,9 +287,10 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         // #region agent log
-        _dbgWS("RSM:connectWS", "H2/H3/H5: opening WebSocket", ["url": url.absoluteString.replacingOccurrences(of: apiKey, with: "***")])
+        _dbgWS("RSM:connectWS", "H2/H3/H5: opening WebSocket", ["url": url.absoluteString])
         // #endregion
         webSocketTask = urlSession.webSocketTask(with: request)
         webSocketTask?.resume()
@@ -307,7 +299,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         startReceiveLoop()
         startPingTimer()
 
-        print("[Realtime] Gemini WebSocket opened, waiting for setupComplete...")
+        print("[Realtime] Grok WebSocket opened, waiting for session.created...")
     }
 
     private func sendSetup(_ config: SessionConfig) async throws {
@@ -335,7 +327,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
         isConnected = true
         reconnectAttempts = 0
-        print("[Realtime] Gemini session setup complete")
+        print("[Realtime] Grok session setup complete")
     }
 
     private func waitForSetupComplete(timeout: TimeInterval) async throws -> Bool {
@@ -396,7 +388,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             return
         }
 
-        // Parse Gemini server message into our event model
+        // Parse xAI Realtime server messages into the app's event model.
         let events: [RealtimeServerEvent] = RealtimeServerEvent.parse(from: data)
 
         if events.isEmpty {
@@ -406,10 +398,17 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         }
 
         for event in events {
+            if case .responseFunctionCallArgumentsDone(let callId, _, _) = event {
+                outstandingToolCallIds.insert(callId)
+                toolCallResponseTurnFinished = false
+            } else if case .responseDone = event, !outstandingToolCallIds.isEmpty {
+                toolCallResponseTurnFinished = true
+            }
+
             switch event {
             case .sessionCreated:
                 isConnected = true
-                print("[Realtime] Gemini setupComplete received")
+                print("[Realtime] Grok session.created received")
             case .sessionResumptionUpdate(let token):
                 lastResumptionToken = token
                 print("[Realtime] Session resumption token updated (\(token.prefix(12))...)")
@@ -433,16 +432,20 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     // MARK: - Tool Response Helpers
 
     private func buildToolResponse(id: String, name: String, result: [String: Any]) -> [String: Any] {
-        [
-            "toolResponse": [
-                "functionResponses": [
-                    [
-                        "id": id,
-                        "name": name,
-                        "response": ["result": result]
-                    ] as [String: Any]
-                ]
-            ]
+        let output: String
+        if let data = try? JSONSerialization.data(withJSONObject: result),
+           let string = String(data: data, encoding: .utf8) {
+            output = string
+        } else {
+            output = #"{"error":"Could not encode tool result"}"#
+        }
+        return [
+            "type": "conversation.item.create",
+            "item": [
+                "type": "function_call_output",
+                "call_id": id,
+                "output": output
+            ] as [String: Any]
         ]
     }
 
@@ -529,11 +532,16 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
             Task {
                 do {
-                    let freshKey = try await self.fetchGeminiApiKey()
-                    try await self.connectWebSocket(apiKey: freshKey)
-
                     if let config = self.currentSessionConfig {
+                        let freshToken = try await self.fetchGrokEphemeralToken()
+                        try await self.connectWebSocket(
+                            token: freshToken.value,
+                            model: config.model,
+                            conversationId: config.resumptionHandle ?? self.lastResumptionToken
+                        )
                         try await self.sendSetup(config)
+                    } else {
+                        throw RealtimeError.sendFailed("Missing session configuration during reconnect")
                     }
 
                     self.isReconnecting = false
@@ -577,23 +585,15 @@ extension RealtimeSessionManager: URLSessionWebSocketDelegate {
         if !isConnected {
             earlyCloseReason = info
         }
-        // 1007 "Request contains an invalid argument." right after setup
-        // means something in our setup payload is poisoned — typically a
-        // resumption handle from a session the server already discarded,
-        // or a cachedContent reference that no longer exists. Retrying
-        // with the same state fails forever (observed 2026-06-11: every
-        // reconnect rejected, game permanently frozen). Drop both so the
-        // coordinator's next attempt connects fresh from its checkpoint.
+        // Drop an expired/invalid xAI conversation ID. Coordinator reconnects
+        // also inject an app-owned state packet, so a fresh session is safe.
         if closeCode == .invalidFramePayloadData
             || reasonStr.localizedCaseInsensitiveContains("invalid argument") {
-            print("[Realtime] Setup rejected (invalid argument) — clearing resumption token and cached content for a fresh reconnect")
+            print("[Realtime] Setup rejected (invalid argument) — clearing conversation ID for a fresh reconnect")
             // #region agent log
             _dbgWS("RSM:didClose", "H2/H5: clearing poisoned resumption state after 1007", [:])
             // #endregion
             lastResumptionToken = nil
-            if let key = lastApiKey {
-                GeminiCacheService.shared.invalidate(apiKey: key)
-            }
         }
         handleDisconnect(source: "didClose:\(closeCode.rawValue)")
     }

@@ -91,6 +91,17 @@ public enum PostScoreWatchdogPolicy {
     ///     composing its `get_next_question`; the nudge orphaned that
     ///     in-flight call (toolCallCancellation), the model re-scored, and
     ///     the game froze (debug-f3b222.log 2026-06-25, R2Q2).
+    ///
+    ///     IMPORTANT: this guard applies to the `.armed` window ONLY. The
+    ///     whole point of the guard is to avoid interrupting a response that
+    ///     is still being silently composed — a risk that exists only when
+    ///     NO audio has been produced since `report_score` (i.e. `.armed`).
+    ///     The `.continuation` window is reached exclusively AFTER
+    ///     `responseAudioDone` — the verdict response has already completed,
+    ///     so there is no in-flight generation to orphan. Applying the 12s
+    ///     gate there just manufactured ~11-14s of dead air on every stalled
+    ///     verdict where the model forgot to chain `get_next_question`
+    ///     (debug-f3b222.log 2026-07-31, R2Q3→Q4 / R3Q3→Q4 / R3Q4→Q5).
     public static func decide(
         sessionAlive: Bool,
         pendingNoRoundsEnd: Bool,
@@ -113,7 +124,13 @@ public enum PostScoreWatchdogPolicy {
         if secondsSinceLastAudioDelta < recentAudioWindowSeconds {
             return .reArm(reason: "recent host audio (\(String(format: "%.2f", secondsSinceLastAudioDelta))s)")
         }
-        if secondsSinceLastToolEvent < toolQuietWindowSeconds {
+        // Tool-quiet guard: only meaningful in the `.armed` window, where the
+        // model may still be silently composing its verdict+get_next response
+        // and a nudge would orphan the in-flight call (the 2026-06-25 freeze).
+        // In `.continuation` we are here only because `responseAudioDone`
+        // already fired — the verdict turn completed, so there is nothing
+        // in-flight to protect and blocking here only adds dead air.
+        if reason == .armed, secondsSinceLastToolEvent < toolQuietWindowSeconds {
             return .reArm(reason: "recent tool activity (\(String(format: "%.2f", secondsSinceLastToolEvent))s) — model is composing")
         }
         switch reason {

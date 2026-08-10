@@ -13,37 +13,42 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      # Exact repo secret names (do not coalesce — that can blank the value).
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify secrets are bound
+        run: |
+          echo "token_bound=${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}"
+          echo "project_bound=${{ secrets.SUPABASE_PROJECT_ID != '' }}"
+          if [ "${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}" != "true" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN is not available to this workflow."
+            echo "Open Settings → Secrets → SUPABASE_ACCESS_TOKEN → Update, paste a fresh token from"
+            echo "https://supabase.com/dashboard/account/tokens , then re-run this workflow."
+            exit 1
+          fi
+          if [ -z "${PROJECT_REF}" ]; then
+            echo "::error::SUPABASE_PROJECT_ID secret is empty"
+            exit 1
+          fi
+          echo "project_ref=${PROJECT_REF}"
 
       - uses: supabase/setup-cli@v1
         with:
           version: latest
 
       - name: Deploy edge functions
-        env:
-          # Prefer the standard CLI env var; fall back to alternate secret names.
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN || secrets.SUPABASE_TOKEN || secrets.SUPABASE_ACCESS_TOKEN_GITHUB }}
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID || 'kakhzbcuudkrrktkobjs' }}
         run: |
           set -euo pipefail
-
           echo "supabase CLI: $(supabase --version)"
-          echo "project_ref: ${PROJECT_REF}"
-          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
-            echo "::error::No Supabase access token found in GitHub Actions secrets."
-            echo "Expected one of: SUPABASE_ACCESS_TOKEN, SUPABASE_TOKEN"
-            echo "Add it under Repo Settings → Secrets and variables → Actions"
-            exit 1
-          fi
-          echo "access_token: present (${#SUPABASE_ACCESS_TOKEN} chars)"
-
           for fn in generate-questions grade-answer challenge-answer realtime-token gemini-token grok-token; do
             echo "==== Deploying ${fn} ===="
             supabase functions deploy "${fn}" \
               --project-ref "${PROJECT_REF}" \
               --no-verify-jwt
           done
-
           echo "All edge functions deployed."

@@ -1,4 +1,4 @@
-name: Deploy Edge Functions
+name: Deploy Supabase Edge Functions
 
 on:
   push:
@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "supabase/functions/**"
-      - "supabase/config.toml"
       - ".github/workflows/deploy-edge-functions.yml"
   workflow_dispatch:
 
@@ -14,41 +13,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # Exact repo secret names (do not coalesce — that can blank the value).
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Verify secrets are bound
-        run: |
-          echo "token_bound=${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}"
-          echo "project_bound=${{ secrets.SUPABASE_PROJECT_ID != '' }}"
-          if [ "${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}" != "true" ]; then
-            echo "::error::SUPABASE_ACCESS_TOKEN is not available to this workflow."
-            echo "Open Settings → Secrets → SUPABASE_ACCESS_TOKEN → Update, paste a fresh token from"
-            echo "https://supabase.com/dashboard/account/tokens , then re-run this workflow."
-            exit 1
-          fi
-          if [ -z "${PROJECT_REF}" ]; then
-            echo "::error::SUPABASE_PROJECT_ID secret is empty"
-            exit 1
-          fi
-          echo "project_ref=${PROJECT_REF}"
-
-      - uses: supabase/setup-cli@v1
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      - name: Deploy edge functions
-        run: |
-          set -euo pipefail
-          echo "supabase CLI: $(supabase --version)"
-          for fn in generate-questions grade-answer challenge-answer realtime-token gemini-token grok-token; do
-            echo "==== Deploying ${fn} ===="
-            supabase functions deploy "${fn}" \
-              --project-ref "${PROJECT_REF}" \
-              --no-verify-jwt
-          done
-          echo "All edge functions deployed."
+      - name: Deploy all Edge Functions
+        run: supabase functions deploy --project-ref $SUPABASE_PROJECT_ID

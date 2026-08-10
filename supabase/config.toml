@@ -16,3 +16,6 @@ verify_jwt = false
 
 [functions.gemini-token]
 verify_jwt = false
+
+[functions.grok-token]
+verify_jwt = false

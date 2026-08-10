@@ -25,5 +25,19 @@ jobs:
         with:
           version: latest
 
+      # Deploy one-by-one with --use-api so a transient esm.sh/Docker
+      # failure on one function cannot block the others (e.g. grok-token).
       - name: Deploy all Edge Functions
-        run: supabase functions deploy --project-ref $SUPABASE_PROJECT_ID
+        run: |
+          set -euo pipefail
+          failed=0
+          for fn in generate-questions grade-answer challenge-answer realtime-token gemini-token grok-token; do
+            echo "==== Deploying ${fn} ===="
+            if ! supabase functions deploy "${fn}" \
+              --project-ref "$SUPABASE_PROJECT_ID" \
+              --use-api; then
+              echo "::error::Failed to deploy ${fn}"
+              failed=1
+            fi
+          done
+          exit "${failed}"

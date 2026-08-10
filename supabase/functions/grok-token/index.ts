@@ -39,10 +39,19 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const apiKey = Deno.env.get("XAI_API_KEY");
+    // Trim / strip accidental quotes from dashboard paste.
+    const rawKey = Deno.env.get("XAI_API_KEY") ?? "";
+    const apiKey = rawKey.trim().replace(/^['"]|['"]$/g, "");
     if (!apiKey) {
       throw new Error("XAI_API_KEY not configured");
     }
+
+    const keyMeta = {
+      keyLength: apiKey.length,
+      keyPrefix: apiKey.slice(0, 4),
+      looksLikeXaiKey: apiKey.startsWith("xai-"),
+    };
+    log("minting ephemeral token", keyMeta);
 
     const response = await fetch(XAI_CLIENT_SECRETS_URL, {
       method: "POST",
@@ -58,9 +67,16 @@ Deno.serve(async (req: Request) => {
       log("xAI rejected ephemeral-token request", {
         status: response.status,
         body: body.slice(0, 300),
+        ...keyMeta,
       });
+      // Surface upstream detail so curl can diagnose without dashboard logs.
       return new Response(
-        JSON.stringify({ error: "Unable to create Grok voice session" }),
+        JSON.stringify({
+          error: "Unable to create Grok voice session",
+          upstreamStatus: response.status,
+          upstreamBody: body.slice(0, 500),
+          ...keyMeta,
+        }),
         {
           status: 502,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -42,7 +42,7 @@ final class RealtimeModelsTests: XCTestCase {
     func test_sessionUpdate_usesGrokVoiceDefaults() throws {
         let config = SessionConfig(
             instructions: "Host the game.",
-            voice: "eve",
+            voice: "sal",
             tools: [
                 RealtimeTool(
                     name: "get_next_question",
@@ -54,7 +54,7 @@ final class RealtimeModelsTests: XCTestCase {
         let json = try XCTUnwrap(RealtimeClientEvent.sessionUpdate(config).toJSON())
         XCTAssertEqual(json["type"] as? String, "session.update")
         let session = try XCTUnwrap(json["session"] as? [String: Any])
-        XCTAssertEqual(session["voice"] as? String, "eve")
+        XCTAssertEqual(session["voice"] as? String, "sal")
         let reasoning = try XCTUnwrap(session["reasoning"] as? [String: Any])
         XCTAssertEqual(reasoning["effort"] as? String, "none")
         let tools = try XCTUnwrap(session["tools"] as? [[String: Any]])

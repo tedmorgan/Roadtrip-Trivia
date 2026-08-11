@@ -36,7 +36,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession!
-    private var currentVoice: String = "eve"
+    private var currentVoice: String = "sal"
     private var currentSessionConfig: SessionConfig?
     private var isReceiving = false
     private var isReconnecting = false
@@ -55,7 +55,15 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     /// xAI can emit parallel tool calls. Continue only after response.done has
     /// arrived and every call in that response has a corresponding output.
     private var outstandingToolCallIds = Set<String>()
+    /// True once the model turn that issued tool call(s) has finished
+    /// (`response.done`). Stays true across empty flushes so a late-queued
+    /// tool result can still trigger `response.create`.
     private var toolCallResponseTurnFinished = false
+    /// True from first tool-call in a model turn until we successfully send
+    /// the continuation `response.create`. Prevents the race where the app
+    /// queues outputs (clearing `outstandingToolCallIds`) before
+    /// `response.done`, which previously left continuation permanently stuck.
+    private var awaitingToolContinuation = false
     private var pendingContinuationInstructions: String?
 
     /// Captures the close reason when the WebSocket is terminated by the server
@@ -167,6 +175,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         pendingToolResponses.removeAll()
         outstandingToolCallIds.removeAll()
         toolCallResponseTurnFinished = false
+        awaitingToolContinuation = false
         pendingContinuationInstructions = nil
         if !preserveResumptionToken {
             lastResumptionToken = nil
@@ -187,6 +196,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         pendingToolResponses.append((id: callId, name: name, result: result))
         outstandingToolCallIds.remove(callId)
         hasPendingResults = true
+        print("[Realtime] Queued tool result \(name.isEmpty ? callId : name) (pending=\(pendingToolResponses.count), outstanding=\(outstandingToolCallIds.count), turnFinished=\(toolCallResponseTurnFinished))")
     }
 
     /// Send all queued function outputs, then request one continuation after
@@ -196,13 +206,21 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             pendingContinuationInstructions = instructions
         }
         guard toolCallResponseTurnFinished, outstandingToolCallIds.isEmpty else {
+            print("[Realtime] flushPendingResults deferred (turnFinished=\(toolCallResponseTurnFinished), outstanding=\(outstandingToolCallIds.count), pending=\(pendingToolResponses.count))")
             return
         }
 
-        let hadPending = hasPendingResults
+        // Empty flush must NOT clear turnFinished — the coordinator often
+        // flushes on response.done before tool handlers have queued outputs.
+        // Leaving the flag set lets the later queue+flush succeed.
+        if pendingToolResponses.isEmpty && pendingContinuationInstructions == nil {
+            print("[Realtime] flushPendingResults idle (waiting for tool outputs)")
+            return
+        }
+
         let responses = pendingToolResponses
         pendingToolResponses.removeAll()
-        if hadPending { hasPendingResults = false }
+        hasPendingResults = false
         let continuationInstructions = pendingContinuationInstructions
         pendingContinuationInstructions = nil
 
@@ -216,8 +234,10 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
         if !responses.isEmpty || continuationInstructions != nil {
             try await send(.responseCreate(instructions: continuationInstructions))
+            print("[Realtime] Sent \(responses.count) tool output(s) + response.create")
         }
         toolCallResponseTurnFinished = false
+        awaitingToolContinuation = false
     }
 
     private(set) var hasPendingResults = false
@@ -400,9 +420,16 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         for event in events {
             if case .responseFunctionCallArgumentsDone(let callId, _, _) = event {
                 outstandingToolCallIds.insert(callId)
+                awaitingToolContinuation = true
                 toolCallResponseTurnFinished = false
-            } else if case .responseDone = event, !outstandingToolCallIds.isEmpty {
-                toolCallResponseTurnFinished = true
+            } else if case .responseDone = event {
+                // Mark the tool turn finished even if outputs were already
+                // queued (outstanding emptied). Otherwise response.create
+                // never fires and gameplay stalls after set_game_config /
+                // get_next_question.
+                if awaitingToolContinuation || !outstandingToolCallIds.isEmpty || hasPendingResults {
+                    toolCallResponseTurnFinished = true
+                }
             }
 
             switch event {

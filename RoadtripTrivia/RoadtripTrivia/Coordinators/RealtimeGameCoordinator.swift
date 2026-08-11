@@ -655,7 +655,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 try audioService.startStreaming()
                 gameViewModel.transition(to: .playing)
 
-                try await sessionManager.send(.responseCreate(instructions: "Begin the game."))
+                try await sessionManager.send(.responseCreate(instructions: "Ask ONLY for the team name, then stop and wait for their answer."))
                 _dbg("CONN","RealtimeGameCoordinator.swift:\(#line)","startNewGame: game started successfully",[:])
                 print("[RealtimeGame] Game started")
             } catch {
@@ -3020,8 +3020,12 @@ class RealtimeGameCoordinator: ObservableObject {
         lastToolEventAt = Date()
         Task {
             do {
+                // Queue the tool output immediately so response.done can mark
+                // the turn finished even if playback drain takes several seconds.
+                // Drain only gates the follow-up response.create.
+                try await sessionManager.queueFunctionResult(callId: callId, result: result, name: name)
                 await audioService.waitForPlaybackToDrain()
-                try await sessionManager.submitFunctionResult(callId: callId, result: result, name: name)
+                try await sessionManager.flushPendingResults()
             } catch {
                 print("[RealtimeGame] Failed to submit function result: \(error)")
             }

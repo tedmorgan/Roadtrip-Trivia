@@ -8,7 +8,7 @@ struct SystemPromptBuilder {
 
     static func buildSessionConfig(
         locationLabel: String?,
-        voice: String = "eve",
+        voice: String = "sal",
         resumeContext: ResumeContext? = nil,
         preconfiguredContext: PreConfiguredContext? = nil,
         gameStatePacket: GameStatePacket? = nil,
@@ -42,18 +42,22 @@ struct SystemPromptBuilder {
         var policy = """
         You are Roadtrip Trivia's CarPlay voice host. Witty, warm, concise. No emojis. \
         The iOS app owns questions, grading, score UI, and end-of-game farewell. Always \
-        use tools — without them the screen freezes. Never invent or reuse questions.
+        use tools — without them the screen freezes. Never invent or reuse questions. \
+        Voice-only — always end your turn with a question or prompt, never go silent, \
+        and never ask multiple setup questions in one turn.
 
         FLOW:
         1. Call get_next_question. If result has `announce`, say it VERBATIM, then read \
            questionText VERBATIM. For MC say ALL options as \
            "Is it A: …, B: …, C: …, or D: …?" then "What do you think?".
-        2. Wait for a real answer. Silence is not a skip — skip only if they say "skip". \
-           A letter or option text is enough for MC.
+        2. Wait for a real answer. Silence/noise is NOT a skip and NOT an answer — \
+           skip only if they literally say "skip". A letter or option text is enough for MC. \
+           After a long pause you may briefly re-engage ("Take your time — what do you think?"), \
+           then keep waiting.
         3. Call report_score({playerAnswer, isCorrect}) immediately — no spoken reaction first \
            (app plays chime/gong). App grades against its answer key.
         4. Say report_score.say VERBATIM (+ one short color phrase). Then go to step 1. \
-           No filler ("ready?", "shall we continue?").
+           No filler ("ready?", "shall we continue?", "let's hit the road").
         5. End of round: follow nextAction — brief summary, ask "Want to keep going?". \
            Call end_game only if they say stop/end game. When roundsRemaining is 0, \
            acknowledge and wait — the app drives the farewell.
@@ -149,15 +153,19 @@ struct SystemPromptBuilder {
             """
         } else {
             let rulesNote = isFirstGame
-                ? "After config, briefly mention: 2 hints/round, 1 challenge/round, lightning every 5 rounds. Say once: \"Keep the app open on your iPhone while you play to follow your score.\""
-                : "After config, skip rules."
+                ? "After config, briefly mention: 2 hints/round, 1 challenge/round, lightning every 5 rounds. Speak this exact sentence once near the start: \"Keep the app open on your iPhone while you play to follow your score.\""
+                : "After config, skip rules — player knows them."
 
             memory += """
 
-            NEW GAME SETUP — one question per turn, wait for each answer:
-            1) team name  2) ages (kids/teens/adults/mix)  3) difficulty \
-            (Simple/Tricky/Wicked Hard/Einstein). Then call set_game_config once \
-            (playerCount=1). \(rulesNote) Then call get_next_question immediately.
+            NEW GAME SETUP — ask ONE question per turn, WAIT for the answer, then ask the next:
+            Step 1: Ask ONLY for their team name — STOP and wait.
+            Step 2: Ask ONLY about ages: "Are the players kids, teens, adults, or a mix?" — STOP and wait.
+            Step 3: Ask ONLY which difficulty: "Pick your difficulty: Simple, Tricky, Wicked Hard, or Einstein. Which one?" — STOP and wait. Listen for a single word like "tricky".
+            If the player answers Simple/Tricky/Wicked Hard/Einstein, do NOT ask difficulty again. \
+            After all 3 answers, call set_game_config exactly once (playerCount=1). \(rulesNote) \
+            Then IMMEDIATELY call get_next_question — do NOT add a transition like "let's hit the road" first. \
+            The app will tell you what to say next based on whether the questions are loaded yet.
             """
         }
 

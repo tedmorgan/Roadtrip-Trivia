@@ -70,6 +70,11 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     /// so `waitForSetupComplete` can fail fast instead of waiting for timeout.
     private var earlyCloseReason: String?
 
+    /// True after xAI acknowledges our `session.update` with `session.updated`.
+    /// `session.created` alone is not enough — kicking off `response.create`
+    /// before the update applies produces silent/empty first turns.
+    private var sessionConfigurationApplied = false
+
     /// Stores the last close code/reason for diagnostics regardless of connection state.
     private(set) var lastCloseInfo: String?
 
@@ -105,6 +110,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         intentionalDisconnect = false
         isReconnecting = false
         hasEmittedDisconnectEvent = false
+        sessionConfigurationApplied = false
         currentVoice = sessionConfig.voice
 
         let config = sessionConfig
@@ -171,6 +177,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         isConnected = false
+        sessionConfigurationApplied = false
         currentSessionConfig = nil
         pendingToolResponses.removeAll()
         outstandingToolCallIds.removeAll()
@@ -332,21 +339,27 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         let promptLen = config.instructions.count
         _dbgWS("RSM:sendSetup", "H2/H4: sending setup message", ["setupJsonBytes": setupSize, "promptChars": promptLen, "model": config.model, "voice": config.voice, "toolCount": config.tools.count])
         // #endregion
+        // Require a fresh session.updated for THIS update — session.created may
+        // already have flipped isConnected before we even sent session.update.
+        sessionConfigurationApplied = false
         try await sendRawJSON(json)
         // #region agent log
-        _dbgWS("RSM:sendSetup", "H2: setup message sent OK, waiting for setupComplete")
+        _dbgWS("RSM:sendSetup", "H2: setup message sent OK, waiting for session.updated")
         // #endregion
 
-        let created = try await waitForSetupComplete(timeout: 15)
-        if !created {
+        let configured = try await waitForSetupComplete(timeout: 15)
+        if !configured {
             // #region agent log
-            _dbgWS("RSM:sendSetup", "H2: setupComplete TIMEOUT", ["earlyClose": earlyCloseReason ?? "none"])
+            _dbgWS("RSM:sendSetup", "H2: session.updated TIMEOUT", ["earlyClose": earlyCloseReason ?? "none", "isConnected": isConnected])
             // #endregion
             throw RealtimeError.connectionTimeout
         }
 
         isConnected = true
         reconnectAttempts = 0
+        // #region agent log
+        _dbgWS("RSM:sendSetup", "H2: session.updated received — ready for response.create", ["voice": config.voice])
+        // #endregion
         print("[Realtime] Grok session setup complete")
     }
 
@@ -354,7 +367,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            if isConnected { return true }
+            if sessionConfigurationApplied { return true }
             if let reason = earlyCloseReason {
                 throw RealtimeError.sendFailed("WebSocket closed by server: \(reason)")
             }
@@ -362,7 +375,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                 throw RealtimeError.sendFailed("WebSocket connection lost before setup completed")
             }
         }
-        return isConnected
+        return sessionConfigurationApplied
     }
 
     // MARK: - Receive Loop
@@ -436,12 +449,22 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             case .sessionCreated:
                 isConnected = true
                 print("[Realtime] Grok session.created received")
+            case .sessionUpdated:
+                sessionConfigurationApplied = true
+                isConnected = true
+                print("[Realtime] Grok session.updated received")
+                // #region agent log
+                _dbgWS("RSM:sessionUpdated", "H2: session.updated applied", ["voice": currentVoice])
+                // #endregion
             case .sessionResumptionUpdate(let token):
                 lastResumptionToken = token
                 print("[Realtime] Session resumption token updated (\(token.prefix(12))...)")
             case .error(let message, let code):
                 print("[Realtime] API error [\(code ?? "?")]: \(message)")
                 connectionError = message
+                // #region agent log
+                _dbgWS("RSM:error", "API error event", ["code": code ?? "nil", "message": String(message.prefix(300))])
+                // #endregion
             case .responseAudioDelta:
                 break // Don't log audio deltas (too noisy)
             case .responseDone:

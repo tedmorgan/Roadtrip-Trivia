@@ -518,7 +518,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 30;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;
@@ -547,7 +547,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 30;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;

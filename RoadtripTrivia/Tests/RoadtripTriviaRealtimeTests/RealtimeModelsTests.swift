@@ -85,6 +85,28 @@ final class RealtimeModelsTests: XCTestCase {
         XCTAssertTrue(args.contains("playerAnswer"))
     }
 
+    func test_parse_sessionCreated_and_sessionUpdated_areDistinct() throws {
+        let created = try JSONSerialization.data(withJSONObject: [
+            "type": "session.created",
+            "session": ["id": "sess_1"]
+        ])
+        let updated = try JSONSerialization.data(withJSONObject: [
+            "type": "session.updated"
+        ])
+
+        let createdEvents = RealtimeServerEvent.parse(from: created)
+        let updatedEvents = RealtimeServerEvent.parse(from: updated)
+
+        guard case .sessionCreated(let sessionId)? = createdEvents.first else {
+            return XCTFail("expected session.created")
+        }
+        XCTAssertEqual(sessionId, "sess_1")
+
+        guard case .sessionUpdated = updatedEvents.first else {
+            return XCTFail("expected session.updated — kickoff must wait for this, not session.created")
+        }
+    }
+
     func test_parse_conversationCreated_asResumptionToken() throws {
         let payload: [String: Any] = [
             "type": "conversation.created",

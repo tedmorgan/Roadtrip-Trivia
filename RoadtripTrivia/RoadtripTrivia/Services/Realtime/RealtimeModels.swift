@@ -242,6 +242,21 @@ enum RealtimeServerEvent {
                 arguments: json["arguments"] as? String ?? "{}"
             )]
 
+        case "response.output_item.done", "response.output_item.added":
+            // Fallback if Grok emits a function_call item without
+            // response.function_call_arguments.done (session manager dedupes).
+            if let item = json["item"] as? [String: Any],
+               (item["type"] as? String) == "function_call" {
+                let name = item["name"] as? String ?? ""
+                guard !name.isEmpty else { return [] }
+                return [.responseFunctionCallArgumentsDone(
+                    callId: item["call_id"] as? String ?? UUID().uuidString,
+                    name: name,
+                    arguments: item["arguments"] as? String ?? "{}"
+                )]
+            }
+            return []
+
         case "response.done":
             var events: [RealtimeServerEvent] = []
             if let response = json["response"] as? [String: Any],

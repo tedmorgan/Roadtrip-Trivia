@@ -432,6 +432,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
         for event in events {
             if case .responseFunctionCallArgumentsDone(let callId, _, _) = event {
+                if outstandingToolCallIds.contains(callId) {
+                    continue
+                }
                 outstandingToolCallIds.insert(callId)
                 awaitingToolContinuation = true
                 toolCallResponseTurnFinished = false
@@ -471,6 +474,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                 print("[Realtime] Event: turnComplete")
             case .responseFunctionCallArgumentsDone(_, let name, _):
                 print("[Realtime] Event: toolCall → \(name)")
+            case .unknown(let type):
+                print("[Realtime] Event: unknown type=\(type)")
+                _dbgWS("RSM:unknownEvent", "unhandled server event type", ["type": type])
             default:
                 print("[Realtime] Event: \(event)")
             }

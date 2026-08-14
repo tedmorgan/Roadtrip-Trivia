@@ -159,6 +159,15 @@ class RealtimeGameCoordinator: ObservableObject {
     /// BATCH_PENDING result instead of awaiting too long. The app then nudges
     /// with a fresh `responseCreate` the instant the batch is ready.
     private var firstRoundNudgeArmed = false
+    /// Host audio-done count during conversational setup (before set_game_config).
+    /// After the 3 intro questions, Grok often stalls instead of calling the tool,
+    /// so the app never starts `QuestionBatchService` (build 30: disconnect at
+    /// round 0 with no `set_game_config` in debug-f3b222).
+    private var introHostTurnsCompleted = 0
+    /// Player VAD-stop count during the same setup window.
+    private var introPlayerSpeechStops = 0
+    private var setupConfigNudgeWork: DispatchWorkItem?
+    private var setupConfigNudgeSent = false
     /// Tracks whether the question batch for Round 1 is ready to serve. Used
     /// together with `firstRoundNudgeArmed` to decide when to fire the Round 1
     /// start nudge.
@@ -589,6 +598,10 @@ class RealtimeGameCoordinator: ObservableObject {
         getNextQuestionAwaitingBatch = false
         firstRoundNudgeRetryWork?.cancel()
         firstRoundNudgeRetryWork = nil
+        cancelSetupConfigNudge()
+        introHostTurnsCompleted = 0
+        introPlayerSpeechStops = 0
+        setupConfigNudgeSent = false
         lastGetNextQuestionCallId = nil
         reserveDueToCancelRewind = false
         lastServedQuestionResult = nil
@@ -940,6 +953,9 @@ class RealtimeGameCoordinator: ObservableObject {
                 gameViewModel.transition(to: .listening)
             }
 
+        case .inputAudioBufferSpeechStopped:
+            noteIntroPlayerSpeechStopped()
+
         case .responseAudioTranscriptDelta(let text):
             handleInputTranscriptDelta(text)
 
@@ -1037,6 +1053,9 @@ class RealtimeGameCoordinator: ObservableObject {
                 && gameViewModel.currentSession != nil {
                 startPostScoreSilenceWatchdog(reason: "post-score-continuation")
             }
+            // Count intro host turns so we can force `set_game_config` if
+            // Grok finishes the three setup questions and never calls the tool.
+            noteIntroHostTurnCompleted()
             // If the AI just finished speaking during setup (rules walkthrough
             // or "let's jump in!" bridge) and the Round 1 batch is ready,
             // nudge the AI to call get_next_question now. See the
@@ -1324,6 +1343,8 @@ class RealtimeGameCoordinator: ObservableObject {
 
         currentDifficulty = difficulty
         gameConfigAccepted = true
+        cancelSetupConfigNudge()
+        setupConfigNudgeSent = true
 
         // Update the game session with the player's choices
         gameViewModel.createSession(
@@ -2527,6 +2548,57 @@ class RealtimeGameCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Setup Config Nudge
+
+    /// Grok often finishes the three intro questions and never calls
+    /// `set_game_config`, so question batch generation never starts.
+    private func noteIntroHostTurnCompleted() {
+        guard aiDidConversationalSetup, !gameConfigAccepted, currentRoundNumber == 0 else { return }
+        introHostTurnsCompleted += 1
+        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","intro host turn completed",["turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops])
+        if introHostTurnsCompleted >= 3 {
+            scheduleSetupConfigNudge(delay: 12, reason: "post-intro-timeout")
+        }
+    }
+
+    private func noteIntroPlayerSpeechStopped() {
+        guard aiDidConversationalSetup, !gameConfigAccepted, currentRoundNumber == 0 else { return }
+        introPlayerSpeechStops += 1
+        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","intro player speech stopped",["turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops])
+        if introHostTurnsCompleted >= 3 || (introPlayerSpeechStops >= 3 && introHostTurnsCompleted >= 1) {
+            scheduleSetupConfigNudge(delay: 2.5, reason: "post-intro-answer")
+        }
+    }
+
+    private func cancelSetupConfigNudge() {
+        setupConfigNudgeWork?.cancel()
+        setupConfigNudgeWork = nil
+    }
+
+    private func scheduleSetupConfigNudge(delay: TimeInterval, reason: String) {
+        guard !gameConfigAccepted, !setupConfigNudgeSent else { return }
+        cancelSetupConfigNudge()
+        let work = DispatchWorkItem { [weak self] in
+            self?.fireSetupConfigNudge(reason: reason)
+        }
+        setupConfigNudgeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","setup config nudge scheduled",["delay":delay,"reason":reason])
+    }
+
+    private func fireSetupConfigNudge(reason: String) {
+        guard !gameConfigAccepted, !setupConfigNudgeSent else { return }
+        setupConfigNudgeSent = true
+        setupConfigNudgeWork = nil
+        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","setup config nudge FIRED",["reason":reason,"turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops])
+        Task { [weak self] in
+            guard let self else { return }
+            try? await self.sessionManager.send(.responseCreate(
+                instructions: "The player already answered team name, ages, and difficulty. Do NOT ask another question and do NOT speak first. Call set_game_config NOW with playerCount=1 and those answers, then immediately call get_next_question."
+            ))
+        }
+    }
+
     // MARK: - Round 1 Start Nudge
 
     /// Fires the Round 1 start nudge when BOTH (a) the question batch is
@@ -3621,6 +3693,7 @@ class RealtimeGameCoordinator: ObservableObject {
         cancelReconnectResumeWatchdog()
         round1StuckEscalationWork?.cancel()
         round1StuckEscalationWork = nil
+        cancelSetupConfigNudge()
     }
 
     // MARK: - No-Rounds-Left End-of-Game Driver

@@ -85,6 +85,35 @@ final class RealtimeModelsTests: XCTestCase {
         XCTAssertTrue(args.contains("playerAnswer"))
     }
 
+    func test_parse_outputItemDone_functionCall_isToolEvent() throws {
+        let payload: [String: Any] = [
+            "type": "response.output_item.done",
+            "item": [
+                "type": "function_call",
+                "call_id": "call_cfg",
+                "name": "set_game_config",
+                "arguments": #"{"playerCount":1,"teamName":"Teds","difficulty":"tricky","ageBands":["adults"]}"#
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let events = RealtimeServerEvent.parse(from: data)
+        guard case .responseFunctionCallArgumentsDone(let callId, let name, let args)? = events.first else {
+            return XCTFail("expected function call from output_item.done")
+        }
+        XCTAssertEqual(callId, "call_cfg")
+        XCTAssertEqual(name, "set_game_config")
+        XCTAssertTrue(args.contains("teamName"))
+    }
+
+    func test_parse_unknownEventType_isPreserved() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["type": "response.created"])
+        let events = RealtimeServerEvent.parse(from: data)
+        guard case .unknown(let type)? = events.first else {
+            return XCTFail("expected unknown event")
+        }
+        XCTAssertEqual(type, "response.created")
+    }
+
     func test_parse_sessionCreated_and_sessionUpdated_areDistinct() throws {
         let created = try JSONSerialization.data(withJSONObject: [
             "type": "session.created",

@@ -117,6 +117,10 @@ class AudioStreamingService: ObservableObject {
     /// if WE never heard voice, the server VAD tripped on noise/echo and
     /// playback must not be interrupted (BargeInPolicy).
     private var lastLocalVoiceAt: Date?
+    /// The actual time the microphone became live after speaker playback
+    /// drained. The coordinator uses this instead of Gemini's earlier
+    /// generation-complete event when validating a player's answer.
+    private(set) var lastMicOpenedAt: Date?
 
     /// RMS threshold (Int16 scale) above which a converted mic chunk counts
     /// as voice-bearing. ~500 ≈ -36 dBFS — above steady road noise, below
@@ -181,6 +185,7 @@ class AudioStreamingService: ObservableObject {
         playerNode.play()
         isStreaming = true
         isMicMuted = false
+        lastMicOpenedAt = Date()
         scheduledBufferCount = 0
         _lastMuteToggle = Date()
         _micOnTime = 0; _micOffTime = 0; _audioSentCount = 0; _audioSuppressedCount = 0
@@ -221,6 +226,7 @@ class AudioStreamingService: ObservableObject {
         muteFailsafeTimer = nil
         preRoll.clear()
         lastLocalVoiceAt = nil
+        lastMicOpenedAt = nil
         audioEngine.inputNode.removeTap(onBus: 0)
         playerNode.stop()
         audioEngine.stop()
@@ -324,11 +330,17 @@ class AudioStreamingService: ObservableObject {
         muteFailsafeTimer = nil
         isMicMuted = false
         suspendedForProcessing = false
+        lastMicOpenedAt = Date()
     }
 
     private func scheduleUnmuteMic() {
         guard !farewellMuted else { return }
         unmuteMicTimer?.cancel()
+        // Discard the tail captured while host audio was physically playing.
+        // Only audio arriving during the short drain delay below is eligible
+        // for pre-roll; replaying the host's own last words made Gemini score
+        // an invented player answer.
+        preRoll.clear()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             guard !self.farewellMuted else { return }
@@ -342,6 +354,7 @@ class AudioStreamingService: ObservableObject {
             // #endregion
             self.suspendedForProcessing = false
             self.isMicMuted = false
+            self.lastMicOpenedAt = Date()
             self.muteFailsafeTimer?.cancel()
             self.muteFailsafeTimer = nil
         }
@@ -561,6 +574,7 @@ class AudioStreamingService: ObservableObject {
             }
             suspendedForProcessing = false
             isMicMuted = false
+            lastMicOpenedAt = Date()
             playerNode.stop()
             playerNode.play()
             isPlayingResponse = false

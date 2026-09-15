@@ -17,10 +17,10 @@ import Foundation
 /// fabricated, and placeholder answers ("no answer", "silence", …) are
 /// fabricated regardless of transcripts.
 ///
-/// Fail-open design: transcript corroboration denies at most `maxDenials`
-/// times per question, so a broken transcription stream degrades to the old
-/// behavior instead of deadlocking the game. Placeholder answers are denied
-/// without a cap — waiting forever on a genuinely silent player is correct.
+/// This guard deliberately fails closed. A stalled question is recoverable;
+/// revealing the answer and charging a question before the player speaks is
+/// not. Placeholder answers and plausible fabricated answers are both denied
+/// until post-playback player speech is corroborated.
 public enum NoAnswerGuardPolicy {
 
     public enum Verdict: Equatable {
@@ -45,9 +45,7 @@ public enum NoAnswerGuardPolicy {
         isChallenge: Bool,
         isScoringRevision: Bool,
         isLightning: Bool,
-        playerSpokeSinceServe: Bool,
-        priorDenials: Int,
-        maxDenials: Int = 2
+        playerSpokeSinceServe: Bool
     ) -> Verdict {
         // Detours and re-grades are themselves triggered by player speech
         // (or by the host correcting itself) — never block them. Lightning
@@ -61,7 +59,7 @@ public enum NoAnswerGuardPolicy {
             return .deny(reason: "placeholder answer \"\(playerAnswer)\"")
         }
 
-        if !playerSpokeSinceServe && priorDenials < maxDenials {
+        if !playerSpokeSinceServe {
             return .deny(reason: "no player speech since the question was read")
         }
 
@@ -91,7 +89,7 @@ public enum NoAnswerGuardPolicy {
         lastPlayerSpeechAt: Date?,
         answerWindowOpenedAt: Date?,
         questionServedAt: Date?,
-        prerollGrace: TimeInterval = 1.0
+        prerollGrace: TimeInterval = 2.5
     ) -> Bool {
         if let windowStart = answerWindowOpenedAt {
             guard let spoke = lastPlayerSpeechAt else { return false }

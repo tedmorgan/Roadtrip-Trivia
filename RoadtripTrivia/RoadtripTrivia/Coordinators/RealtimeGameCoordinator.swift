@@ -389,11 +389,15 @@ class RealtimeGameCoordinator: ObservableObject {
     // and chopping off natural 2-3s mid-question pauses during the AI's
     // reaction-then-question read. In `debug-f3b222 3.log` the watchdog fired
     // during R1Q3, R2Q1, R3Q1 with silentSec of 2.65–2.9s and sent
-    // `responseCancel` — user heard "host cut off during R1Q3 response".
-    // Bumping to 3.0s aligns with the midTurn watchdog (4.0s) so the QREAD
-    // path only fires for genuinely stuck reads, not natural pauses.
-    private let questionReadTimeoutSeconds: Double = 3.0
-    private let questionReadSilenceThreshold: Double = 3.0
+    // Gemini blocking tool turns routinely take 3–4s before their first
+    // audio delta. A 3s Grok-era timeout injected a competing client turn,
+    // cancelled get_next_question, and restarted the same question.
+    private var questionReadTimeoutSeconds: Double {
+        LiveProvider.selected == .gemini ? 8.0 : 3.0
+    }
+    private var questionReadSilenceThreshold: Double {
+        LiveProvider.selected == .gemini ? 7.0 : 3.0
+    }
     /// Timestamp of the most recent `responseAudioDelta`. Used by
     /// `questionReadWatchdog` to tell sustained AI reading from a brief
     /// post-serve tail that trails off into silence.
@@ -1606,9 +1610,13 @@ class RealtimeGameCoordinator: ObservableObject {
         // where the model chimed ~1.5s after the mic opened — before the
         // player could answer. Measure speech from the answer window (mic
         // live), not the muted question-read.
+        let effectiveAnswerWindowOpenedAt: Date? = [
+            answerWindowOpenedAt,
+            audioService.lastMicOpenedAt,
+        ].compactMap { $0 }.max()
         let playerSpokeSinceServe = NoAnswerGuardPolicy.playerProvidedAnswer(
             lastPlayerSpeechAt: lastPlayerSpeechAt,
-            answerWindowOpenedAt: answerWindowOpenedAt,
+            answerWindowOpenedAt: effectiveAnswerWindowOpenedAt,
             questionServedAt: lastQuestionServedAt
         )
         let answerVerdict = NoAnswerGuardPolicy.decide(
@@ -1617,13 +1625,12 @@ class RealtimeGameCoordinator: ObservableObject {
             isChallenge: isChallenge,
             isScoringRevision: isScoringRevision,
             isLightning: reportedLightning || isLightningRound,
-            playerSpokeSinceServe: playerSpokeSinceServe,
-            priorDenials: answerDenialsForCurrentQuestion
+            playerSpokeSinceServe: playerSpokeSinceServe
         )
         if case .deny(let denyReason) = answerVerdict {
             answerDenialsForCurrentQuestion += 1
             // #region agent log
-            let answerWindowElapsed = answerWindowOpenedAt.map { Date().timeIntervalSince($0) } ?? -1
+            let answerWindowElapsed = effectiveAnswerWindowOpenedAt.map { Date().timeIntervalSince($0) } ?? -1
             _dbg("NO_ANSWER_GUARD","RealtimeGameCoordinator.swift:\(#line)","report_score DENIED — \(denyReason)",["playerAnswer":args.playerAnswer ?? "nil","denials":answerDenialsForCurrentQuestion,"round":currentRoundNumber,"question":args.questionIndex,"spokeSinceServe":playerSpokeSinceServe,"answerWindowElapsedSec":answerWindowElapsed])
             // #endregion
             print("[RealtimeGame] report_score denied (\(denyReason)) — telling AI to wait for a real answer")

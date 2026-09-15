@@ -102,7 +102,10 @@ final class GeminiLiveCodec {
                         "prefixPaddingMs": 333,
                         "silenceDurationMs": 800,
                     ],
-                    "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
+                    // A game-show question must finish before the answer
+                    // window opens. CarPlay echo and eager player speech must
+                    // not cancel a blocking tool turn and restart the question.
+                    "activityHandling": "NO_INTERRUPTION",
                     "turnCoverage": "TURN_INCLUDES_ONLY_ACTIVITY",
                 ],
                 "sessionResumption": sessionResumption,

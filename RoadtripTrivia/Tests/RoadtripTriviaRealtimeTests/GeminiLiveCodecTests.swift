@@ -50,6 +50,8 @@ final class GeminiLiveCodecTests: XCTestCase {
         XCTAssertEqual(compression["triggerTokens"] as? Int, 25_000)
         let window = try XCTUnwrap(compression["slidingWindow"] as? [String: Any])
         XCTAssertEqual(window["targetTokens"] as? Int, 8_000)
+        let realtimeInput = try XCTUnwrap(setup["realtimeInputConfig"] as? [String: Any])
+        XCTAssertEqual(realtimeInput["activityHandling"] as? String, "NO_INTERRUPTION")
     }
 
     func test_audioAndControlMessagesUseGeminiEnvelopes() throws {

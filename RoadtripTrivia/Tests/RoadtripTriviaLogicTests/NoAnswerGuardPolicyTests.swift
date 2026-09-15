@@ -9,8 +9,7 @@ final class NoAnswerGuardPolicyTests: XCTestCase {
         isChallenge: Bool = false,
         isScoringRevision: Bool = false,
         isLightning: Bool = false,
-        playerSpokeSinceServe: Bool = true,
-        priorDenials: Int = 0
+        playerSpokeSinceServe: Bool = true
     ) -> NoAnswerGuardPolicy.Verdict {
         NoAnswerGuardPolicy.decide(
             playerAnswer: playerAnswer,
@@ -18,8 +17,7 @@ final class NoAnswerGuardPolicyTests: XCTestCase {
             isChallenge: isChallenge,
             isScoringRevision: isScoringRevision,
             isLightning: isLightning,
-            playerSpokeSinceServe: playerSpokeSinceServe,
-            priorDenials: priorDenials
+            playerSpokeSinceServe: playerSpokeSinceServe
         )
     }
 
@@ -57,8 +55,7 @@ final class NoAnswerGuardPolicyTests: XCTestCase {
 
     func test_placeholderDenialIsNotCapped() {
         let verdict = decide(playerAnswer: "no answer",
-                             playerSpokeSinceServe: true,
-                             priorDenials: 99)
+                             playerSpokeSinceServe: true)
         guard case .deny = verdict else {
             return XCTFail("waiting forever on a silent player is correct — placeholders never expire into acceptance")
         }
@@ -69,14 +66,14 @@ final class NoAnswerGuardPolicyTests: XCTestCase {
         XCTAssertEqual(decide(playerAnswer: "I don't know"), .accept)
     }
 
-    // MARK: - Fail-open cap (broken transcription stream)
+    // MARK: - Fail-closed answer safety
 
-    func test_transcriptDenialCapsOut() {
+    func test_transcriptDenialNeverExpiresIntoAnswerReveal() {
         let verdict = decide(playerAnswer: "B",
-                             playerSpokeSinceServe: false,
-                             priorDenials: 2)
-        XCTAssertEqual(verdict, .accept,
-                       "after maxDenials the guard fails open so a dead transcript stream can't deadlock the game")
+                             playerSpokeSinceServe: false)
+        guard case .deny = verdict else {
+            return XCTFail("missing player speech must never expire into an answer reveal")
+        }
     }
 
     // MARK: - Exemptions
@@ -108,7 +105,7 @@ final class NoAnswerGuardPolicyTests: XCTestCase {
 
     func test_playerProvidedAnswer_countsRealAnswerAfterGrace() {
         let windowOpen = Date()
-        let realAnswer = windowOpen.addingTimeInterval(2.0) // spoke 2s after mic live
+        let realAnswer = windowOpen.addingTimeInterval(3.0) // spoke after echo-tail grace
         XCTAssertTrue(NoAnswerGuardPolicy.playerProvidedAnswer(
             lastPlayerSpeechAt: realAnswer,
             answerWindowOpenedAt: windowOpen,

@@ -38,15 +38,10 @@ class AuthService: NSObject, ObservableObject {
         self.urlSession = URLSession(configuration: config)
         super.init()
 
-        #if DEBUG
-        // For development testing: auto-authenticate without real auth
-        currentUserID = "test-user-dev"
-        currentToken = "test-token-dev"
-        isAuthenticated = true
-        print("[Auth] DEBUG mode — auto-authenticated")
-        #else
+        // Debug device builds must use a real Supabase session too. The old
+        // `test-token-dev` bypass cannot authenticate secure Edge Functions
+        // and made CarPlay appear to hang before Gemini produced any audio.
         restoreSession()
-        #endif
     }
 
     // MARK: - Sign in with Apple (AUTH-01, primary method)

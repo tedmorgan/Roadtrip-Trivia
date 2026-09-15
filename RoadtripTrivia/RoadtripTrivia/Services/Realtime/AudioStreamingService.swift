@@ -50,7 +50,7 @@ class AudioStreamingService: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let audioManager = AudioSessionManager.shared
-    private weak var sessionManager: RealtimeSessionManager?
+    private weak var sessionManager: (any LiveSessionManaging)?
     private var cancellables = Set<AnyCancellable>()
 
     /// Target format for Gemini Live API input: PCM16, 16kHz, mono.
@@ -134,7 +134,7 @@ class AudioStreamingService: ObservableObject {
 
     // MARK: - Setup
 
-    func configure(sessionManager: RealtimeSessionManager) {
+    func configure(sessionManager: any LiveSessionManaging) {
         self.sessionManager = sessionManager
 
         // Cancel any previous subscriptions to prevent duplicate audio processing

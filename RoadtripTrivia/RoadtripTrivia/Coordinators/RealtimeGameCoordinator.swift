@@ -27,7 +27,7 @@ class RealtimeGameCoordinator: ObservableObject {
 
     private let gameViewModel: GameViewModel
     private let stateManager: VoiceControlStateManager
-    private let sessionManager = RealtimeSessionManager()
+    private let sessionManager: any LiveSessionManaging
     private let audioService = AudioStreamingService()
     private let audioManager = AudioSessionManager.shared
     private let locationService = LocationService.shared
@@ -508,9 +508,14 @@ class RealtimeGameCoordinator: ObservableObject {
 
     // MARK: - Init
 
-    init(gameViewModel: GameViewModel, stateManager: VoiceControlStateManager) {
+    init(
+        gameViewModel: GameViewModel,
+        stateManager: VoiceControlStateManager,
+        sessionManager: any LiveSessionManaging = RealtimeSessionManager()
+    ) {
         self.gameViewModel = gameViewModel
         self.stateManager = stateManager
+        self.sessionManager = sessionManager
 
         assert(
             FarewellEndGamePolicy.areThresholdsAcceptable(
@@ -901,7 +906,7 @@ class RealtimeGameCoordinator: ObservableObject {
             .store(in: &cancellables)
 
         // Observe WebSocket connection state — triggers coordinator-managed reconnect
-        sessionManager.$isConnected
+        sessionManager.isConnectedPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] connected in
                 guard let self else { return }

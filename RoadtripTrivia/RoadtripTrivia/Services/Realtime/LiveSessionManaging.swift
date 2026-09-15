@@ -41,3 +41,13 @@ protocol LiveSessionManaging: AnyObject {
     ) async throws
     func flushPendingResults(instructions: String?) async throws
 }
+
+extension LiveSessionManaging {
+    func disconnect() {
+        disconnect(preserveResumptionToken: false)
+    }
+
+    func flushPendingResults() async throws {
+        try await flushPendingResults(instructions: nil)
+    }
+}

@@ -5,11 +5,11 @@
 ##
 ## Honors a pre-set $DEVELOPER_DIR (e.g. when invoked from an Xcode
 ## build phase, Xcode exports its own DEVELOPER_DIR pointing at the
-## running Xcode). Otherwise falls back to Xcode-beta because the
+## running Xcode). Otherwise falls back to the installed Xcode beta because the
 ## system Command Line Tools `swift` is currently out of sync with the
 ## macOS SDK on this machine.
 
-DEVELOPER_DIR ?= /Users/tedmorgan/Downloads/Xcode-beta.app/Contents/Developer
+DEVELOPER_DIR ?= /Applications/Xcode-beta.app/Contents/Developer
 SWIFT         := $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift
 CACHE_DIR     := $(CURDIR)/.swiftpm-cache
 BUILD_DIR     := $(CURDIR)/.build

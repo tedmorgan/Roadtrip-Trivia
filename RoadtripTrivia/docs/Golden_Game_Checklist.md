@@ -1,6 +1,6 @@
 # Golden Game Checklist
 
-A ~10-minute scripted test to run before calling any build good. Run it the
+A scripted device test to run before calling any build good. Run it the
 same way every time; mark each row pass/fail. After the drive, export the logs
 and run `make audit` for the objective half of the report.
 
@@ -8,10 +8,10 @@ Setup: CarPlay connected, at least 2 rounds available, app open on iPhone.
 
 | # | Step | Expect | Pass? |
 |---|------|--------|-------|
-| 1 | Start new game | Host asks team name only, waits | |
+| 1 | Start new game | The selected Gemini voice says "Welcome to Roadtrip Trivia!" with game-show energy, asks team name only, and waits | |
 | 2 | Answer team name immediately (no pause) | Host hears it first try | |
-| 3 | Answer ages, then difficulty ("tricky") immediately | No repeat needed, no dead air > 5s | |
-| 4 | Wait for Round 1 intro | Host announces round + category verbatim, then Q1 | |
+| 3 | Answer ages, then difficulty ("tricky") immediately | Host waits for each complete answer; no skipped ages, repeat, or dead air > 5s | |
+| 4 | Wait for Round 1 intro | Host stays silent while questions load, then announces round + category verbatim and reads Q1 once | |
 | 5 | Answer Q1 the instant the host stops talking | Heard first try; chime/gong plays fully | |
 | 6 | Q2: answer, listen to verdict | Spoken verdict + points match the screen exactly | |
 | 7 | Q3: give a wrong answer | Host states the correct answer; gong plays | |
@@ -27,7 +27,8 @@ Setup: CarPlay connected, at least 2 rounds available, app open on iPhone.
 | 17 | Purchase a 3-round pack | Balance +3 exactly (not +6); CarPlay label updates without restart | |
 | 18 | Resume/restart game | Continues at next unasked question; no replayed intro | |
 | 19 | Trigger a connection loss (toggle airplane mode 10s) | "Reconnecting" spoken once; resumes where it left off, no round replay | |
-| 20 | Run `make audit` on the exported logs | PASS (no stalls > 10s, no storms, no double consumption) | |
+| 20 | Keep one session connected for more than 15 minutes | GoAway/resumption reconnects without losing context or changing voice | |
+| 21 | Run `make audit` on the exported logs | PASS (no stalls > 10s, no storms, no double consumption); Gemini cost appears per round | |
 
 Hard rules — any one of these is an automatic build rejection:
 

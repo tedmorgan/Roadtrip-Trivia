@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Client → Server Events (xAI Realtime API)
+// MARK: - Provider-neutral Client → Server Events
 
 /// Wrapper for events sent to Grok Voice over xAI's OpenAI-compatible
 /// Realtime WebSocket API.
@@ -141,7 +141,7 @@ struct SessionConfig {
     /// xAI conversation ID used to restore server-side history on reconnect.
     var resumptionHandle: String?
 
-    init(instructions: String, voice: String, tools: [RealtimeTool], model: String = "grok-voice-think-fast-2.0", resumptionHandle: String? = nil) {
+    init(instructions: String, voice: String, tools: [RealtimeTool], model: String = "gemini-3.8-live", resumptionHandle: String? = nil) {
         self.instructions = instructions
         self.voice = voice
         self.tools = tools
@@ -177,6 +177,7 @@ enum RealtimeServerEvent {
     case sessionUpdated
     case responseAudioDelta(responseId: String, audio: String)
     case responseAudioDone(responseId: String)
+    case responseInterrupted
     case responseAudioTranscriptDelta(text: String)
     case responseAudioTranscriptDone(text: String)
     case responseFunctionCallArgumentsDone(callId: String, name: String, arguments: String)
@@ -343,14 +344,16 @@ struct GrokTokenResponse: Codable {
     }
 }
 
-/// Still used by the Gemini REST question-batch service. Live voice no longer
-/// consumes this long-lived key.
-struct GeminiTokenResponse: Codable {
-    let apiKey: String
+struct GeminiLiveTokenResponse: Codable {
+    let value: String
+    let expiresAt: Int
+    let newSessionExpiresAt: Int
     let model: String
 
     enum CodingKeys: String, CodingKey {
-        case apiKey = "api_key"
+        case value
+        case expiresAt = "expires_at"
+        case newSessionExpiresAt = "new_session_expires_at"
         case model
     }
 }

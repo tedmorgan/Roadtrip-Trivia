@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          for fn in generate-questions grade-answer challenge-answer realtime-token gemini-token grok-token; do
+          for fn in generate-questions grade-answer challenge-answer realtime-token grok-token gemini-live-token gemini-question-batch; do
             echo "==== Deploying ${fn} ===="
             if ! supabase functions deploy "${fn}" \
               --project-ref "$SUPABASE_PROJECT_ID" \

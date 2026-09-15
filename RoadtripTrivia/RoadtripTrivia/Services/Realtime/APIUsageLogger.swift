@@ -28,6 +28,12 @@ class APIUsageLogger {
     private var contextCategory: String?
     private var contextDifficulty: String?
     private var contextPhase: String?   // e.g. "intro" vs "trivia"
+    private var provider = "unknown"
+    private var model = "unknown"
+    private var inputAudioBytes = 0
+    private var outputAudioBytes = 0
+    private var previousPromptTokens: Int?
+    private let metricsLock = NSLock()
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -79,6 +85,82 @@ class APIUsageLogger {
         pendingTrigger = trigger
     }
 
+    func configureProvider(_ provider: String, model: String) {
+        metricsLock.lock()
+        self.provider = provider
+        self.model = model
+        inputAudioBytes = 0
+        outputAudioBytes = 0
+        previousPromptTokens = nil
+        metricsLock.unlock()
+        writeEntry("[SESSION] provider=\(provider) | model=\(model)")
+    }
+
+    func recordInputAudio(bytes: Int) {
+        metricsLock.lock()
+        inputAudioBytes += max(0, bytes)
+        metricsLock.unlock()
+    }
+
+    func recordOutputAudio(bytes: Int) {
+        metricsLock.lock()
+        outputAudioBytes += max(0, bytes)
+        metricsLock.unlock()
+    }
+
+    func logConnectionEvent(_ event: String) {
+        metricsLock.lock()
+        let currentProvider = provider
+        let currentModel = model
+        metricsLock.unlock()
+        writeEntry(
+            "[CONNECTION] provider=\(currentProvider) | model=\(currentModel) | event=\(event)"
+        )
+    }
+
+    func logGeminiUsage(_ usage: [String: Any]) {
+        let prompt = Self.intFromJSON(usage["promptTokenCount"]) ?? 0
+        let response = Self.intFromJSON(usage["responseTokenCount"]) ?? 0
+        let thoughts = Self.intFromJSON(usage["thoughtsTokenCount"]) ?? 0
+        let tool = Self.intFromJSON(usage["toolUsePromptTokenCount"]) ?? 0
+        let total = Self.intFromJSON(usage["totalTokenCount"]) ?? (prompt + response)
+
+        metricsLock.lock()
+        let inputBytes = inputAudioBytes
+        let outputBytes = outputAudioBytes
+        inputAudioBytes = 0
+        outputAudioBytes = 0
+        let previousPrompt = previousPromptTokens
+        previousPromptTokens = prompt
+        let currentProvider = provider
+        let currentModel = model
+        metricsLock.unlock()
+
+        let inputSeconds = Double(inputBytes) / (16_000 * 2)
+        let outputSeconds = Double(outputBytes) / (24_000 * 2)
+        let audioCost = (inputSeconds / 60 * 0.005) + (outputSeconds / 60 * 0.018)
+        let compression = previousPrompt.map { prompt < Int(Double($0) * 0.75) } ?? false
+
+        writeEntry(
+            String(
+                format: "[RECV] type=usageMetadata | provider=%@ | model=%@ | prompt_tokens=%d | response_tokens=%d | thought_tokens=%d | tool_tokens=%d | total_tokens=%d | input_audio_bytes=%d | output_audio_bytes=%d | input_audio_seconds=%.3f | output_audio_seconds=%.3f | estimated_audio_cost_usd=%.6f | context_compression=%@",
+                currentProvider,
+                currentModel,
+                prompt,
+                response,
+                thoughts,
+                tool,
+                total,
+                inputBytes,
+                outputBytes,
+                inputSeconds,
+                outputSeconds,
+                audioCost,
+                compression ? "true" : "false"
+            )
+        )
+    }
+
     /// Log a `response.done` event when the API includes a `usage` object (real token counts + modality breakdown).
     func logResponseDone(status: String, usage: ResponseUsage) {
         var triggerSuffix = ""
@@ -112,6 +194,13 @@ class APIUsageLogger {
         if let phase = contextPhase { parts.append("phase=\(phase)") }
         guard !parts.isEmpty else { return "" }
         return " | " + parts.joined(separator: " | ")
+    }
+
+    private static func intFromJSON(_ value: Any?) -> Int? {
+        if let integer = value as? Int { return integer }
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
     }
 }
 
@@ -214,7 +303,7 @@ struct ResponseUsage {
         return " | " + parts.joined(separator: " | ")
     }
 
-    private static func intFromJSON(_ any: Any?) -> Int? {
+    static func intFromJSON(_ any: Any?) -> Int? {
         if let i = any as? Int { return i }
         if let n = any as? NSNumber { return n.intValue }
         return nil

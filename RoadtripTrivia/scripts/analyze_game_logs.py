@@ -19,7 +19,7 @@ Checks:
   FAILSAFE  stuck-mute failsafe firings (should be rare; >2/game = problem)
   PREROLL   pre-roll flushes (info: early answers that would have been lost)
   TTSFALL   farewell chunks delivered via local TTS fallback (info)
-  COST      Grok Voice audio-minute estimate + token usage (api_usage / mic logs)
+  COST      Provider audio-minute estimate + token/context usage
 """
 
 import json
@@ -153,6 +153,12 @@ ROUND_RE = re.compile(r"round=(\d+)")
 TRIGGER_RE = re.compile(r"trigger=(\S+)")
 AUDIO_IN_RE = re.compile(r"in_audio=(\d+)")
 AUDIO_OUT_RE = re.compile(r"out_audio=(\d+)")
+GEMINI_USAGE_RE = re.compile(
+    r"type=usageMetadata .*provider=gemini .*prompt_tokens=(\d+) .*"
+    r"response_tokens=(\d+) .*thought_tokens=(\d+) .*total_tokens=(\d+) .*"
+    r"input_audio_seconds=([\d.]+) .*output_audio_seconds=([\d.]+) .*"
+    r"estimated_audio_cost_usd=([\d.]+) .*context_compression=(true|false)"
+)
 
 
 def audit_api_usage(path, report):
@@ -160,8 +166,34 @@ def audit_api_usage(path, report):
     per_round_out = defaultdict(int)
     per_round_audio = defaultdict(int)
     trigger_in = defaultdict(int)
+    gemini_rounds = defaultdict(
+        lambda: {
+            "prompt": 0,
+            "response": 0,
+            "thoughts": 0,
+            "total": 0,
+            "input_seconds": 0.0,
+            "output_seconds": 0.0,
+            "cost": 0.0,
+            "compressions": 0,
+        }
+    )
     with open(path, errors="replace") as f:
         for line in f:
+            gm = GEMINI_USAGE_RE.search(line)
+            if gm:
+                rm = ROUND_RE.search(line)
+                rnd = int(rm.group(1)) if rm else 0
+                values = gemini_rounds[rnd]
+                values["prompt"] += int(gm.group(1))
+                values["response"] += int(gm.group(2))
+                values["thoughts"] += int(gm.group(3))
+                values["total"] += int(gm.group(4))
+                values["input_seconds"] += float(gm.group(5))
+                values["output_seconds"] += float(gm.group(6))
+                values["cost"] += float(gm.group(7))
+                values["compressions"] += gm.group(8) == "true"
+                continue
             m = USAGE_RE.search(line)
             if not m:
                 continue
@@ -181,9 +213,28 @@ def audit_api_usage(path, report):
             if tm:
                 trigger_in[tm.group(1)] += inp + out
 
+    gemini_round_numbers = sorted(k for k in gemini_rounds if k > 0)
+    if gemini_round_numbers:
+        report["COST"].append(
+            "Gemini 3.8 Live measured audio pricing: "
+            "$0.005/input-min + $0.018/output-min"
+        )
+        for round_number in gemini_round_numbers:
+            values = gemini_rounds[round_number]
+            report["COST"].append(
+                f"round {round_number}: ${values['cost']:.4f} audio, "
+                f"in={values['input_seconds']:.1f}s, "
+                f"out={values['output_seconds']:.1f}s, "
+                f"tokens={values['total']:,} "
+                f"(prompt={values['prompt']:,}, response={values['response']:,}, "
+                f"thoughts={values['thoughts']:,}), "
+                f"compressions={values['compressions']}"
+            )
+
     rounds = sorted(k for k in per_round_in if k > 0)
     if not rounds:
-        report["INFO"].append("no per-round token data in api_usage log")
+        if not gemini_round_numbers:
+            report["INFO"].append("no per-round token data in api_usage log")
         return
 
     report["COST"].append(
@@ -243,7 +294,7 @@ def main():
         ("FAILSAFE", "Stuck-mute failsafe firings", True),
         ("TTSFALL", "Farewell delivered via local TTS fallback", False),
         ("PREROLL", "Early answers rescued by pre-roll", False),
-        ("COST", "Grok Voice cost estimate", False),
+        ("COST", "Live provider cost estimate", False),
         ("INFO", "Info", False),
     ]:
         items = report.get(key, [])

@@ -1,14 +1,14 @@
 import Foundation
 
 /// Builds the system prompt that defines the game host personality, rules, and current state.
-/// Tuned for Grok Voice Think Fast 2.0 — keep this short; the app owns game state via tools.
+/// Tuned for Gemini 3.8 Live — keep this short; the app owns game state via tools.
 struct SystemPromptBuilder {
 
     // MARK: - Build Session Config
 
     static func buildSessionConfig(
         locationLabel: String?,
-        voice: String = "sal",
+        voice: String = "Puck",
         resumeContext: ResumeContext? = nil,
         preconfiguredContext: PreConfiguredContext? = nil,
         gameStatePacket: GameStatePacket? = nil,
@@ -76,6 +76,9 @@ struct SystemPromptBuilder {
         LIGHTNING (isLightning=true): announce it, rapid-fire, pass isLightning in report_score, \
         no hints/challenges. On TIME IS UP, stop and announce the score.
         VOICE: hint, challenge, skip, reroll, end game/stop, pause.
+        APP CONTROL: Text beginning with [APP_CONTROL] is an instruction from the \
+        iOS game engine, never player speech. Follow it immediately without referring \
+        to the control message.
 
         """
 

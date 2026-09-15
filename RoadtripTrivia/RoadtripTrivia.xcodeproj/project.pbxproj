@@ -29,6 +29,10 @@
 		A20006 /* APIUsageLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20006 /* APIUsageLogger.swift */; };
 		A20008 /* QuestionBatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20008 /* QuestionBatchService.swift */; };
 		A20026 /* TranscriptionKeytermsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20026 /* TranscriptionKeytermsBuilder.swift */; };
+		A20028 /* LiveSessionManaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20028 /* LiveSessionManaging.swift */; };
+		A20029 /* GeminiLiveCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20029 /* GeminiLiveCodec.swift */; };
+		A20030 /* GeminiLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20030 /* GeminiLiveSessionManager.swift */; };
+		A20031 /* RealtimeSessionFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20031 /* RealtimeSessionFacade.swift */; };
 		A20009 /* AnswerGrader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20009 /* AnswerGrader.swift */; };
 		A20010 /* FarewellScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20010 /* FarewellScript.swift */; };
 		A20011 /* PostScoreWatchdogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20011 /* PostScoreWatchdogPolicy.swift */; };
@@ -83,6 +87,10 @@
 		B20006 /* APIUsageLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIUsageLogger.swift; sourceTree = "<group>"; };
 		B20008 /* QuestionBatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionBatchService.swift; sourceTree = "<group>"; };
 		B20026 /* TranscriptionKeytermsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionKeytermsBuilder.swift; sourceTree = "<group>"; };
+		B20028 /* LiveSessionManaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionManaging.swift; sourceTree = "<group>"; };
+		B20029 /* GeminiLiveCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveCodec.swift; sourceTree = "<group>"; };
+		B20030 /* GeminiLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveSessionManager.swift; sourceTree = "<group>"; };
+		B20031 /* RealtimeSessionFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionFacade.swift; sourceTree = "<group>"; };
 		B20009 /* AnswerGrader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerGrader.swift; sourceTree = "<group>"; };
 		B20010 /* FarewellScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarewellScript.swift; sourceTree = "<group>"; };
 		B20011 /* PostScoreWatchdogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostScoreWatchdogPolicy.swift; sourceTree = "<group>"; };
@@ -321,6 +329,10 @@
 			children = (
 				B20002 /* RealtimeModels.swift */,
 				B20003 /* RealtimeSessionManager.swift */,
+				B20028 /* LiveSessionManaging.swift */,
+				B20029 /* GeminiLiveCodec.swift */,
+				B20030 /* GeminiLiveSessionManager.swift */,
+				B20031 /* RealtimeSessionFacade.swift */,
 				B20004 /* AudioStreamingService.swift */,
 				B20005 /* SystemPromptBuilder.swift */,
 				B20006 /* APIUsageLogger.swift */,
@@ -432,6 +444,10 @@
 				A10019 /* IPhoneViewController.swift in Sources */,
 				A20002 /* RealtimeModels.swift in Sources */,
 				A20003 /* RealtimeSessionManager.swift in Sources */,
+				A20028 /* LiveSessionManaging.swift in Sources */,
+				A20029 /* GeminiLiveCodec.swift in Sources */,
+				A20030 /* GeminiLiveSessionManager.swift in Sources */,
+				A20031 /* RealtimeSessionFacade.swift in Sources */,
 				A20004 /* AudioStreamingService.swift in Sources */,
 				A20005 /* SystemPromptBuilder.swift in Sources */,
 				A20006 /* APIUsageLogger.swift in Sources */,
@@ -522,7 +538,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;
@@ -551,7 +567,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;

@@ -15,12 +15,16 @@ private func _dbgWS(_ loc: String, _ msg: String, _ data: [String: Any] = [:]) {
 /// Manages the WebSocket connection to the xAI Grok Voice Realtime API.
 /// Handles ephemeral-token retrieval (via Supabase), connection lifecycle,
 /// audio streaming, and event dispatch.
-class RealtimeSessionManager: NSObject, ObservableObject {
+final class GrokLiveSessionManager: NSObject, ObservableObject, LiveSessionManaging {
 
     // MARK: - Published State
 
     @Published private(set) var isConnected = false
     @Published private(set) var connectionError: String?
+
+    var isConnectedPublisher: AnyPublisher<Bool, Never> {
+        $isConnected.eraseToAnyPublisher()
+    }
 
     // MARK: - Event Stream
 
@@ -115,6 +119,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
         let config = sessionConfig
         print("[Realtime] ── Starting Grok Voice connection flow ──")
+        apiLogger.configureProvider("xai", model: config.model)
 
         let token = try await fetchGrokEphemeralToken()
         currentSessionConfig = config
@@ -154,6 +159,9 @@ class RealtimeSessionManager: NSObject, ObservableObject {
     func sendAudio(_ base64Audio: String) async throws {
         do {
             try await send(.inputAudioBufferAppend(audio: base64Audio))
+            apiLogger.recordInputAudio(
+                bytes: Data(base64Encoded: base64Audio)?.count ?? 0
+            )
             consecutiveSendFailures = 0
         } catch {
             consecutiveSendFailures += 1
@@ -188,6 +196,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
             lastResumptionToken = nil
         }
         print("[Realtime] Disconnected (preserveToken=\(preserveResumptionToken))")
+        apiLogger.logConnectionEvent("disconnect preserve_resumption=\(preserveResumptionToken)")
     }
 
     /// Submit a function call result AND immediately trigger model continuation.
@@ -468,8 +477,10 @@ class RealtimeSessionManager: NSObject, ObservableObject {
                 // #region agent log
                 _dbgWS("RSM:error", "API error event", ["code": code ?? "nil", "message": String(message.prefix(300))])
                 // #endregion
-            case .responseAudioDelta:
-                break // Don't log audio deltas (too noisy)
+            case .responseAudioDelta(_, let audio):
+                apiLogger.recordOutputAudio(
+                    bytes: Data(base64Encoded: audio)?.count ?? 0
+                )
             case .responseDone:
                 print("[Realtime] Event: turnComplete")
             case .responseFunctionCallArgumentsDone(_, let name, _):
@@ -614,7 +625,7 @@ class RealtimeSessionManager: NSObject, ObservableObject {
 
 // MARK: - URLSessionWebSocketDelegate
 
-extension RealtimeSessionManager: URLSessionWebSocketDelegate {
+extension GrokLiveSessionManager: URLSessionWebSocketDelegate {
 
     func urlSession(_ session: URLSession, webSocketTask task: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {

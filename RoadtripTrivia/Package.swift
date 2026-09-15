@@ -56,10 +56,14 @@ let package = Package(
                 "SystemPromptBuilder.swift",
                 "QuestionBatchService.swift",
                 "AudioStreamingService.swift",
+                "LiveSessionManaging.swift",
+                "GeminiLiveSessionManager.swift",
+                "RealtimeSessionFacade.swift",
             ],
             sources: [
                 "RealtimeModels.swift",
                 "APIUsageLogger.swift",
+                "GeminiLiveCodec.swift",
             ]
         ),
         .testTarget(

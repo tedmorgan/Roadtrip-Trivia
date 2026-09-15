@@ -26,11 +26,6 @@ final class QuestionBatchService {
     static let shared = QuestionBatchService()
 
     private let supabaseURL = "https://kakhzbcuudkrrktkobjs.supabase.co/functions/v1"
-    /// Gemini 3.1 Flash Lite — GA id (`gemini-3.1-flash-lite`).
-    /// The `-preview` suffix was discontinued 2026-05-25 per Google;
-    /// architecture matches preview, only the identifier changes.
-    private let restModel = "gemini-3.1-flash-lite"
-    private let restBase = "https://generativelanguage.googleapis.com/v1beta"
 
     private(set) var currentBatch: QuestionBatch?
     private var roundCursor = 0
@@ -59,7 +54,6 @@ final class QuestionBatchService {
     /// Generate a batch of 5 rounds (4 standard + 1 lightning) via Gemini REST.
     /// Retries once on JSON parse failure.
     func generateBatch(
-        apiKey: String,
         location: String,
         difficulty: String,
         ageBands: [String],
@@ -67,22 +61,18 @@ final class QuestionBatchService {
         usedCategories: [String],
         startingRound: Int = 1
     ) async throws -> QuestionBatch {
-        let prompt = buildPrompt(
-            location: location,
-            difficulty: difficulty,
-            ageBands: ageBands,
-            questionHistory: questionHistory,
-            usedCategories: usedCategories,
-            startingRound: startingRound
-        )
-
         var lastError: Error?
         for attempt in 1...2 {
             do {
-                let batch = try await callRESTAndParse(prompt: prompt, apiKey: apiKey,
-                                                        startingRound: startingRound,
-                                                        historyCount: questionHistory.count,
-                                                        attempt: attempt)
+                let batch = try await callEdgeAndParse(
+                    location: location,
+                    difficulty: difficulty,
+                    ageBands: ageBands,
+                    questionHistory: questionHistory,
+                    usedCategories: usedCategories,
+                    startingRound: startingRound,
+                    attempt: attempt
+                )
                 let shuffled = Self.shuffleAnswerPositions(batch)
                 currentBatch = shuffled
                 roundCursor = 0
@@ -98,28 +88,40 @@ final class QuestionBatchService {
         throw lastError!
     }
 
-    private func callRESTAndParse(prompt: String, apiKey: String,
-                                   startingRound: Int, historyCount: Int,
-                                   attempt: Int) async throws -> QuestionBatch {
-        guard let url = URL(string: "\(restBase)/models/\(restModel):generateContent?key=\(apiKey)") else {
+    private func callEdgeAndParse(
+        location: String,
+        difficulty: String,
+        ageBands: [String],
+        questionHistory: [String],
+        usedCategories: [String],
+        startingRound: Int,
+        attempt: Int
+    ) async throws -> QuestionBatch {
+        guard let url = URL(string: "\(supabaseURL)/gemini-question-batch") else {
             throw BatchError.invalidURL
+        }
+        guard let accessToken = AuthService.shared.currentToken, !accessToken.isEmpty else {
+            throw BatchError.authenticationRequired
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(AuthService.shared.supabaseApiKey, forHTTPHeaderField: "apikey")
         request.timeoutInterval = 30
 
         let body: [String: Any] = [
-            "contents": [["parts": [["text": prompt]]]],
-            "generationConfig": [
-                "responseMimeType": "application/json",
-                "temperature": 1.0
-            ]
+            "location": location,
+            "difficulty": difficulty,
+            "ageBands": ageBands,
+            "questionHistory": questionHistory,
+            "usedCategories": usedCategories,
+            "startingRound": startingRound,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        print("[QuestionBatch] Generating batch attempt \(attempt) (rounds \(startingRound)-\(startingRound + 4), history: \(historyCount))…")
+        print("[QuestionBatch] Generating secure server-side batch attempt \(attempt) (rounds \(startingRound)-\(startingRound + 4), history: \(questionHistory.count))…")
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -129,41 +131,12 @@ final class QuestionBatchService {
             throw BatchError.apiFailure(code)
         }
 
-        struct Part: Codable { let text: String }
-        struct Content: Codable { let parts: [Part] }
-        struct Candidate: Codable { let content: Content }
-        struct GeminiResp: Codable { let candidates: [Candidate] }
-
-        let gemini = try JSONDecoder().decode(GeminiResp.self, from: data)
-        guard let jsonText = gemini.candidates.first?.content.parts.first?.text else {
-            throw BatchError.emptyResponse
-        }
-
+        let batch = try JSONDecoder().decode(QuestionBatch.self, from: data)
         // #region agent log
-        Self._batchLog("H3_PARSE","QuestionBatchService.swift:\(#line)","raw JSON from Gemini",["rawLen":jsonText.count,"first50":String(jsonText.prefix(50)),"last50":String(jsonText.suffix(50)),"attempt":attempt])
-        // #endregion
-        let batch = try Self.parseBatchJSON(jsonText)
-        // #region agent log
-        Self._batchLog("H3_PARSE","QuestionBatchService.swift:\(#line)","parseBatchJSON succeeded",["rounds":batch.rounds.count,"totalQ":batch.rounds.map { $0.questions.count }.reduce(0, +),"attempt":attempt])
+        Self._batchLog("H3_PARSE","QuestionBatchService.swift:\(#line)","secure batch decode succeeded",["rounds":batch.rounds.count,"totalQ":batch.rounds.map { $0.questions.count }.reduce(0, +),"attempt":attempt])
         // #endregion
         print("[QuestionBatch] Generated \(batch.rounds.count) rounds, \(batch.rounds.map { $0.questions.count }.reduce(0, +)) total questions")
         return batch
-    }
-
-    /// Fetch the Gemini API key from the Supabase edge function.
-    func fetchAPIKey() async throws -> String {
-        guard let url = URL(string: "\(supabaseURL)/gemini-token") else {
-            throw BatchError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw BatchError.apiFailure((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        return try JSONDecoder().decode(GeminiTokenResponse.self, from: data).apiKey
     }
 
     /// Return the next question from the current batch, or nil if exhausted.
@@ -214,161 +187,6 @@ final class QuestionBatchService {
         currentBatch = nil
         roundCursor = 0
         questionCursor = 0
-    }
-
-    // MARK: - Prompt
-
-    private func buildPrompt(
-        location: String,
-        difficulty: String,
-        ageBands: [String],
-        questionHistory: [String],
-        usedCategories: [String],
-        startingRound: Int
-    ) -> String {
-        let diffRules: String
-        switch difficulty.lowercased() {
-        case "simple":
-            diffRules = """
-            Multiple choice with 4 options. Family-friendly, lenient. \
-            Include options as ["A: ...", "B: ...", "C: ...", "D: ..."]. \
-            correctAnswer is just the letter (e.g. "A").
-            """
-        case "tricky":
-            diffRules = """
-            Multiple choice with 4 options. Include wordplay and misdirection. \
-            Include options as ["A: ...", "B: ...", "C: ...", "D: ..."]. \
-            correctAnswer is just the letter (e.g. "B").
-            """
-        case "wicked_hard":
-            diffRules = "Free response only. Genuinely challenging. Set options to null. correctAnswer is the answer text."
-        case "einstein":
-            diffRules = "Free response only. Expert-level. Set options to null. correctAnswer is the answer text."
-        default:
-            diffRules = """
-            Multiple choice with 4 options. \
-            Include options as ["A: ...", "B: ...", "C: ...", "D: ..."]. \
-            correctAnswer is just the letter.
-            """
-        }
-
-        // Lightning rounds are anchored to ABSOLUTE round numbers — every 5th round
-        // (5, 10, 15, …) is a lightning round. Within any 5 consecutive rounds there is
-        // exactly one multiple of 5. This keeps lightning alignment consistent even
-        // when a batch is regenerated mid-game after a resume.
-        let lightningRound = ((startingRound + 4) / 5) * 5
-        var roundDesc = ""
-        for r in startingRound...(startingRound + 4) {
-            if r == lightningRound {
-                roundDesc += "  Round \(r): 10 questions (LIGHTNING — shorter, faster pacing, isLightning=true)\n"
-            } else {
-                roundDesc += "  Round \(r): 5 questions (standard, isLightning=false)\n"
-            }
-        }
-
-        let avoidCats = usedCategories.isEmpty ? "None" : usedCategories.joined(separator: ", ")
-
-        let historyBlock: String
-        if questionHistory.isEmpty {
-            historyBlock = "None — first game."
-        } else {
-            historyBlock = "- " + questionHistory.joined(separator: "\n- ")
-        }
-
-        return """
-        Generate trivia questions for a voice-based road trip game.
-
-        LOCATION: \(location)
-        DIFFICULTY: \(difficulty)
-        PLAYER AGES: \(ageBands.joined(separator: ", "))
-
-        Generate exactly 5 rounds:
-        \(roundDesc)
-
-        CATEGORY RULES:
-        - Choose 5 DIFFERENT broad categories from: Science & Nature, History, Geography, \
-        Sports, Entertainment, Food & Drink, Art & Literature, Music, Pop Culture, \
-        Animals & Wildlife, Movies & TV, World Cultures, Technology, Mythology & Legends.
-        - Every question in a round MUST be from that round's single category.
-        - Do NOT reuse these already-used categories: \(avoidCats)
-
-        LOCATION RULES (IMPORTANT):
-        - The player is currently near: \(location).
-        - At least 1 question in EACH standard round MUST relate to or reference the \
-        player's location, state, or region. For example, a local landmark, a famous \
-        person from the area, a regional food, a sports team, a historical event, etc.
-        - The remaining questions in the round can be from anywhere.
-        - For the lightning round, at least 2 of the 10 questions should be location-related.
-
-        DIFFICULTY RULES:
-        \(diffRules)
-        For multiple choice, randomize which letter (A-D) is correct for each question.
-
-        BANNED TOPICS — do NOT generate questions covering ANY of these subjects:
-        \(historyBlock)
-        Every question must be on a completely different topic from the banned list.
-
-        Return ONLY valid JSON in this exact format (no markdown, no explanation):
-        {
-          "rounds": [
-            {
-              "roundNumber": \(startingRound),
-              "category": "Category Name",
-              "isLightning": false,
-              "questions": [
-                {
-                  "questionText": "Full question text here?",
-                  "options": ["A: First option", "B: Second option", "C: Third option", "D: Fourth option"],
-                  "correctAnswer": "B"
-                }
-              ]
-            }
-          ]
-        }
-        """
-    }
-
-    // MARK: - JSON Cleanup
-
-    /// Attempt to decode batch JSON, cleaning up common LLM formatting issues.
-    private static func parseBatchJSON(_ raw: String) throws -> QuestionBatch {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Strip markdown code fences if present
-        if text.hasPrefix("```") {
-            if let firstNewline = text.firstIndex(of: "\n") {
-                text = String(text[text.index(after: firstNewline)...])
-            }
-            if text.hasSuffix("```") {
-                text = String(text.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-
-        // Find the outermost { … } respecting quoted strings and escape chars.
-        if let openBrace = text.firstIndex(of: "{") {
-            var depth = 0
-            var inString = false
-            var escaped = false
-            var closeIdx = text.startIndex
-            for i in text.indices[openBrace...] {
-                let c = text[i]
-                if escaped { escaped = false; continue }
-                if c == "\\" && inString { escaped = true; continue }
-                if c == "\"" { inString = !inString; continue }
-                if inString { continue }
-                if c == "{" { depth += 1 }
-                else if c == "}" { depth -= 1 }
-                if depth == 0 { closeIdx = i; break }
-            }
-            if closeIdx > openBrace {
-                text = String(text[openBrace...closeIdx])
-            }
-        }
-
-        guard let data = text.data(using: .utf8) else {
-            throw BatchError.invalidJSON
-        }
-        return try JSONDecoder().decode(QuestionBatch.self, from: data)
     }
 
     // MARK: - Answer Position Shuffling
@@ -429,6 +247,7 @@ final class QuestionBatchService {
         case apiFailure(Int)
         case emptyResponse
         case invalidJSON
+        case authenticationRequired
 
         var errorDescription: String? {
             switch self {
@@ -436,6 +255,7 @@ final class QuestionBatchService {
             case .apiFailure(let c): return "Batch API failed (HTTP \(c))"
             case .emptyResponse: return "Empty batch response"
             case .invalidJSON: return "Invalid JSON in batch response"
+            case .authenticationRequired: return "Sign in is required to generate questions"
             }
         }
     }

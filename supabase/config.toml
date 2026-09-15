@@ -14,8 +14,11 @@ verify_jwt = false
 [functions.realtime-token]
 verify_jwt = false
 
-[functions.gemini-token]
-verify_jwt = false
-
 [functions.grok-token]
 verify_jwt = false
+
+[functions.gemini-live-token]
+verify_jwt = true
+
+[functions.gemini-question-batch]
+verify_jwt = true

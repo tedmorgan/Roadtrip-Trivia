@@ -70,7 +70,12 @@ export function extractUserId(req: Request): string | null {
     // Decode the JWT payload (base64url) to get the user ID
     // This is a quick decode — Supabase verifies the token server-side
     const payloadB64 = token.split(".")[1];
-    const payload = JSON.parse(atob(payloadB64));
+    if (!payloadB64) return null;
+    const normalized = payloadB64
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(payloadB64.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(normalized));
     return payload.sub || null;
   } catch {
     return null;

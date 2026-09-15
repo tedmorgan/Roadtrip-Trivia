@@ -238,7 +238,6 @@ class RealtimeGameCoordinator: ObservableObject {
     /// see the answer while reading the question and accidentally reveal it.
     private var activeQuestionCorrectAnswer: String?
     private var activeQuestionOptions: [String]?
-    private var batchAPIKey: String?
     /// Last app-graded correctness per `roundNumber-questionIndex` for plain
     /// (non-hint, non-challenge) scores — enables host corrections without
     /// double-counting questions answered.
@@ -1080,13 +1079,17 @@ class RealtimeGameCoordinator: ObservableObject {
                 // #endregion
             }
 
-        case .usageMetadata(let prompt, let response, let total, _):
-            let usage = ResponseUsage(
-                inputTokens: prompt, outputTokens: response, totalTokens: total,
-                inputTextTokens: nil, inputAudioTokens: nil, inputImageTokens: nil,
-                cachedInputTokens: nil, cachedInputTextTokens: nil, cachedInputAudioTokens: nil,
-                cachedInputImageTokens: nil, outputTextTokens: nil, outputAudioTokens: nil, outputImageTokens: nil)
-            apiLogger.logResponseDone(status: "grok_turn", usage: usage)
+        case .usageMetadata(let prompt, let response, let total, let raw):
+            if raw["promptTokenCount"] != nil {
+                apiLogger.logGeminiUsage(raw)
+            } else {
+                let usage = ResponseUsage(
+                    inputTokens: prompt, outputTokens: response, totalTokens: total,
+                    inputTextTokens: nil, inputAudioTokens: nil, inputImageTokens: nil,
+                    cachedInputTokens: nil, cachedInputTextTokens: nil, cachedInputAudioTokens: nil,
+                    cachedInputImageTokens: nil, outputTextTokens: nil, outputAudioTokens: nil, outputImageTokens: nil)
+                apiLogger.logResponseDone(status: "grok_turn", usage: usage)
+            }
 
         case .error(let message, let code):
             print("[RealtimeGame] Error [\(code ?? "?")]: \(message)")
@@ -1254,8 +1257,6 @@ class RealtimeGameCoordinator: ObservableObject {
         audioService.suspendMicForProcessing()
         Task { [weak self] in
             guard let self else { return }
-            try? await self.sessionManager.send(.responseCancel)
-            try? await Task.sleep(nanoseconds: 150_000_000)
             try? await self.sessionManager.send(.responseCreate(
                 instructions: "The player chose to stop. Say one brief goodbye and do not ask another question."
             ))
@@ -2027,7 +2028,6 @@ class RealtimeGameCoordinator: ObservableObject {
         if hintDenied {
             Task {
                 try? await Task.sleep(nanoseconds: 200_000_000)
-                try? await sessionManager.send(.responseCancel)
                 try? await sessionManager.send(.responseCreate(
                     instructions: "Hint DENIED — all \(maxHintsPerRound) hints used this round. Give NO clue. Tell them and continue the question."
                 ))
@@ -2035,7 +2035,6 @@ class RealtimeGameCoordinator: ObservableObject {
         } else if challengeDenied {
             Task {
                 try? await Task.sleep(nanoseconds: 200_000_000)
-                try? await sessionManager.send(.responseCancel)
                 try? await sessionManager.send(.responseCreate(
                     instructions: "Challenge DENIED — challenge already used this round. Tell them and move on."
                 ))
@@ -2672,8 +2671,6 @@ class RealtimeGameCoordinator: ObservableObject {
         // #endregion
         Task { [weak self] in
             guard let self else { return }
-            try? await self.sessionManager.send(.responseCancel)
-            try? await Task.sleep(nanoseconds: 200_000_000)
             try? await self.sessionManager.send(.responseCreate(
                 instructions: IntroFlowPolicy.round1NudgeInstructions
             ))
@@ -2693,8 +2690,6 @@ class RealtimeGameCoordinator: ObservableObject {
             _dbg("R1_ESCALATE","RealtimeGameCoordinator.swift:\(#line)","Round 1 stuck after nudge — escalating get_next_question",["phase":"\(self.gameViewModel.currentPhase)","totalAnswered":self.totalAnswered])
             // #endregion
             Task {
-                try? await self.sessionManager.send(.responseCancel)
-                try? await Task.sleep(nanoseconds: 150_000_000)
                 try? await self.sessionManager.send(.responseCreate(
                     instructions: "You still have not started Round 1. Call get_next_question immediately to fetch question 1 — tool call only, no small talk."
                 ))
@@ -2726,17 +2721,8 @@ class RealtimeGameCoordinator: ObservableObject {
         QuestionBatchService.shared.reset()
         batchTask = Task {
             do {
-                let key: String
-                if let cached = batchAPIKey {
-                    key = cached
-                } else {
-                    key = try await QuestionBatchService.shared.fetchAPIKey()
-                    await MainActor.run { self.batchAPIKey = key }
-                }
-
                 let location = locationService.currentLocationLabel ?? "United States"
                 let batch = try await QuestionBatchService.shared.generateBatch(
-                    apiKey: key,
                     location: location,
                     difficulty: difficulty,
                     ageBands: ageBands,

@@ -504,6 +504,17 @@ class AudioStreamingService: ObservableObject {
                 scheduleUnmuteMic()
             }
 
+        case .responseInterrupted:
+            // Gemini emits an explicit interruption when server VAD or an
+            // app-control turn supersedes active generation.
+            playerNode.stop()
+            playerNode.play()
+            isPlayingResponse = false
+            bufferLock.lock()
+            scheduledBufferCount = 0
+            bufferLock.unlock()
+            scheduleUnmuteMic()
+
         case .responseDone:
             // AI's full turn is complete (including any text-only responses).
             // If mic is still muted from processing suspend and no audio was played,

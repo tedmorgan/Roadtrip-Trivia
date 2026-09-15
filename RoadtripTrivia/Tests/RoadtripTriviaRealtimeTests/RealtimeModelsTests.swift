@@ -39,7 +39,7 @@ final class RealtimeModelsTests: XCTestCase {
         XCTAssertEqual(transcription["keyterms"] as? [String], terms)
     }
 
-    func test_sessionUpdate_usesGrokVoiceDefaults() throws {
+    func test_sessionUpdate_usesExplicitGrokVoiceConfig() throws {
         let config = SessionConfig(
             instructions: "Host the game.",
             voice: "sal",
@@ -49,7 +49,8 @@ final class RealtimeModelsTests: XCTestCase {
                     description: "Get next question",
                     parameters: ["type": "object", "properties": [:] as [String: Any]]
                 )
-            ]
+            ],
+            model: "grok-voice-think-fast-2.0"
         )
         let json = try XCTUnwrap(RealtimeClientEvent.sessionUpdate(config).toJSON())
         XCTAssertEqual(json["type"] as? String, "session.update")

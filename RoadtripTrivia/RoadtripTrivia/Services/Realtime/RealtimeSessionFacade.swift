@@ -58,7 +58,7 @@ final class RealtimeSessionManager: ObservableObject, LiveSessionManaging {
                 instructions: sessionConfig.instructions,
                 voice: Self.geminiVoice(from: sessionConfig.voice),
                 tools: sessionConfig.tools,
-                model: "gemini-3.8-live",
+                model: "gemini-3.1-flash-live-preview",
                 resumptionHandle: sessionConfig.resumptionHandle
             )
         case .grok:

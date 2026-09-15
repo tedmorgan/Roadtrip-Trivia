@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-/// Direct iOS WebSocket adapter for Gemini 3.8 Live.
+/// Direct iOS WebSocket adapter for Gemini 3.1 Flash Live Preview.
 final class GeminiLiveSessionManager: NSObject, ObservableObject, LiveSessionManaging {
     @Published private(set) var isConnected = false
     @Published private(set) var connectionError: String?
@@ -19,7 +19,7 @@ final class GeminiLiveSessionManager: NSObject, ObservableObject, LiveSessionMan
     private let supabaseURL =
         "https://kakhzbcuudkrrktkobjs.supabase.co/functions/v1"
     private let webSocketBase =
-        "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained"
+        "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained"
 
     private var urlSession: URLSession!
     private var webSocketTask: URLSessionWebSocketTask?
@@ -58,7 +58,7 @@ final class GeminiLiveSessionManager: NSObject, ObservableObject, LiveSessionMan
         currentSessionConfig = sessionConfig
         toolTurnState.reset()
 
-        print("[GeminiLive] Starting Gemini 3.8 Live connection")
+        print("[GeminiLive] Starting Gemini 3.1 Flash Live connection")
         apiLogger.configureProvider("gemini", model: sessionConfig.model)
         let token = try await fetchEphemeralToken()
         try await openWebSocket(token: token.value)

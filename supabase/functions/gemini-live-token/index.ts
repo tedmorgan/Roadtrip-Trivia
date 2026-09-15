@@ -2,8 +2,8 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { extractUserId } from "../_shared/ratelimit.ts";
 
 const GEMINI_AUTH_TOKENS_URL =
-  "https://generativelanguage.googleapis.com/v1alpha/auth_tokens";
-const MODEL = "gemini-3.8-live";
+  "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
+const MODEL = "gemini-3.1-flash-live-preview";
 
 function log(message: string, detail?: unknown) {
   const timestamp = new Date().toISOString();
@@ -85,6 +85,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({
         error: "Unable to create Gemini Live session",
         upstreamStatus: response.status,
+        upstreamError: responseText.slice(0, 500),
       }, 502);
     }
 

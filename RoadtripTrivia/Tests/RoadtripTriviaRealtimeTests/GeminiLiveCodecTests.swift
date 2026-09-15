@@ -16,7 +16,7 @@ final class GeminiLiveCodecTests: XCTestCase {
                     ]
                 ),
             ],
-            model: "gemini-3.8-live",
+            model: "gemini-3.1-flash-live-preview",
             resumptionHandle: "resume-123"
         )
     }
@@ -25,7 +25,7 @@ final class GeminiLiveCodecTests: XCTestCase {
         let setup = try XCTUnwrap(
             GeminiLiveCodec().setupMessage(config: config())["setup"] as? [String: Any]
         )
-        XCTAssertEqual(setup["model"] as? String, "models/gemini-3.8-live")
+        XCTAssertEqual(setup["model"] as? String, "models/gemini-3.1-flash-live-preview")
 
         let generation = try XCTUnwrap(setup["generationConfig"] as? [String: Any])
         XCTAssertEqual(generation["responseModalities"] as? [String], ["AUDIO"])

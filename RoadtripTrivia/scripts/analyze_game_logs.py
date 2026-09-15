@@ -216,7 +216,7 @@ def audit_api_usage(path, report):
     gemini_round_numbers = sorted(k for k in gemini_rounds if k > 0)
     if gemini_round_numbers:
         report["COST"].append(
-            "Gemini 3.8 Live measured audio pricing: "
+            "Gemini 3.1 Flash Live measured audio pricing: "
             "$0.005/input-min + $0.018/output-min"
         )
         for round_number in gemini_round_numbers:

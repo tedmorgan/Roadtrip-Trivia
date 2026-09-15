@@ -141,7 +141,7 @@ struct SessionConfig {
     /// xAI conversation ID used to restore server-side history on reconnect.
     var resumptionHandle: String?
 
-    init(instructions: String, voice: String, tools: [RealtimeTool], model: String = "gemini-3.8-live", resumptionHandle: String? = nil) {
+    init(instructions: String, voice: String, tools: [RealtimeTool], model: String = "gemini-3.1-flash-live-preview", resumptionHandle: String? = nil) {
         self.instructions = instructions
         self.voice = voice
         self.tools = tools

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Builds the system prompt that defines the game host personality, rules, and current state.
-/// Tuned for Gemini 3.8 Live — keep this short; the app owns game state via tools.
+/// Tuned for Gemini 3.1 Flash Live — keep this short; the app owns game state via tools.
 struct SystemPromptBuilder {
 
     // MARK: - Build Session Config

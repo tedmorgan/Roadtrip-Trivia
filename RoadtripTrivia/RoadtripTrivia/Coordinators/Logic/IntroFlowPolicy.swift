@@ -27,13 +27,13 @@ enum IntroFlowPolicy {
         After all 3 answers, do NOT speak — call set_game_config exactly once (playerCount=1) NOW.
         """
 
-    /// Keep-alive while Gemini batch is still generating. Must NOT include a
-    /// speakable "let me pull up…" example — Grok repeated that line, then the
-    /// Round 1 nudge overlapped audio and the app crashed (build 31).
+    /// Keep-alive while the first batch is generating. One short host line
+    /// covers most of the server latency without mentioning loading or using
+    /// the duplicated "let me pull up…" wording that crashed build 31.
     static let batchPendingInstruction = """
-        Questions are still loading. Do NOT speak. Do NOT say you are pulling up \
-        a question. Wait silently. The app will prompt you when they are ready. \
-        Do NOT call get_next_question again on your own.
+        Say exactly: "Great choice! Road warriors, get ready—Round One is about \
+        to hit the road!" Then STOP and wait silently. Do NOT mention loading or \
+        pulling up a question. Do NOT call get_next_question again on your own.
         """
 
     static let round1NudgeInstructions = """

@@ -342,8 +342,11 @@ class RealtimeGameCoordinator: ObservableObject {
     /// reaction (e.g. wrong-answer explanations). A `responseAudioDelta`
     /// (or any tool call) cancels this timer, so it only fires after a
     /// genuine post-reaction silence.
-    private let postScoreContinuationSilenceSeconds: Double =
-        FarewellEndGamePolicy.maxPostScoreContinuationSilenceSeconds
+    private var postScoreContinuationSilenceSeconds: Double {
+        LiveProvider.selected == .gemini
+            ? 2.0
+            : FarewellEndGamePolicy.maxPostScoreContinuationSilenceSeconds
+    }
     /// Must exceed a full nudge → regenerate → first-audio cycle. At 7s
     /// the escalation tore down sessions that were busy regenerating
     /// after the nudge interrupted them (2026-06-11 freeze #2).
@@ -2241,7 +2244,8 @@ class RealtimeGameCoordinator: ObservableObject {
                 // #region agent log
                 _dbg("BATCH","RealtimeGameCoordinator.swift:\(#line)","waiting for batch generation (short poll, max 2s)…",[:])
                 // #endregion
-                let deadline = Date().addingTimeInterval(2.0)
+                let pollDuration = LiveProvider.selected == .gemini ? 0.5 : 2.0
+                let deadline = Date().addingTimeInterval(pollDuration)
                 getNextQuestionAwaitingBatch = true
                 while QuestionBatchService.shared.currentBatch == nil && Date() < deadline {
                     if task.isCancelled { break }
@@ -3082,7 +3086,13 @@ class RealtimeGameCoordinator: ObservableObject {
         Task { @MainActor in
             do {
                 try await sessionManager.queueFunctionResult(callId: callId, result: result, name: name)
-                await audioService.waitForPlaybackToDrain()
+                // Gemini function declarations are BLOCKING: the server owns
+                // sequencing and cannot continue until it receives this tool
+                // response. Waiting for local playback drain here caused a
+                // 8–12s deadlock before Questions 2+.
+                if LiveProvider.selected != .gemini {
+                    await audioService.waitForPlaybackToDrain()
+                }
                 try await sessionManager.flushPendingResults()
                 if let wrap = pendingLightningFlushInstructions, sessionManager.hasPendingResults {
                     pendingLightningFlushInstructions = nil
@@ -3107,7 +3117,9 @@ class RealtimeGameCoordinator: ObservableObject {
                 // the turn finished even if playback drain takes several seconds.
                 // Drain only gates the follow-up response.create.
                 try await sessionManager.queueFunctionResult(callId: callId, result: result, name: name)
-                await audioService.waitForPlaybackToDrain()
+                if LiveProvider.selected != .gemini {
+                    await audioService.waitForPlaybackToDrain()
+                }
                 try await sessionManager.flushPendingResults()
             } catch {
                 print("[RealtimeGame] Failed to submit function result: \(error)")
@@ -3120,9 +3132,12 @@ class RealtimeGameCoordinator: ObservableObject {
         Task { @MainActor in
             do {
                 // xAI can finish producing a response before its final audio
-                // buffers have played locally. Do not start the tool follow-up
-                // until the current host utterance has drained.
-                await audioService.waitForPlaybackToDrain()
+                // buffers have played locally. Gemini's BLOCKING tool calls,
+                // however, must receive their result immediately or neither
+                // side can advance.
+                if LiveProvider.selected != .gemini {
+                    await audioService.waitForPlaybackToDrain()
+                }
                 let merge = pendingLightningFlushInstructions
                 let hasP = sessionManager.hasPendingResults
 

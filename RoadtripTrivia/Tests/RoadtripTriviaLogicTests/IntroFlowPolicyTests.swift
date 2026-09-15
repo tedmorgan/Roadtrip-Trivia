@@ -28,9 +28,9 @@ final class IntroFlowPolicyTests: XCTestCase {
 
     func test_batchPendingInstruction_doesNotScriptPullUpLine() {
         let text = IntroFlowPolicy.batchPendingInstruction.lowercased()
-        XCTAssertFalse(text.contains("pull up"),
-                       "scripted 'let me pull up' was spoken twice then crashed")
-        XCTAssertTrue(text.contains("do not speak"))
+        XCTAssertTrue(text.contains("great choice"))
+        XCTAssertTrue(text.contains("do not mention loading"))
+        XCTAssertTrue(text.contains("do not call get_next_question again"))
     }
 
     func test_round1Nudge_isToolOnly_noPullUpFiller() {

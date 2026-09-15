@@ -66,12 +66,14 @@ Deno.serve(async (req: Request) => {
         uses: 1,
         expireTime,
         newSessionExpireTime,
-        liveConnectConstraints: {
+        fieldMask:
+          "model,generationConfig.responseModalities,sessionResumption",
+        bidiGenerateContentSetup: {
           model: `models/${MODEL}`,
-          config: {
-            sessionResumption: {},
+          generationConfig: {
             responseModalities: ["AUDIO"],
           },
+          sessionResumption: {},
         },
       }),
     });

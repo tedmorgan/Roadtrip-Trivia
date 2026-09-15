@@ -2,7 +2,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { extractUserId } from "../_shared/ratelimit.ts";
 
 const GEMINI_AUTH_TOKENS_URL =
-  "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
+  "https://generativelanguage.googleapis.com/v1alpha/auth_tokens";
 const MODEL = "gemini-3.8-live";
 
 function log(message: string, detail?: unknown) {

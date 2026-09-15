@@ -2771,7 +2771,7 @@ class RealtimeGameCoordinator: ObservableObject {
                         self.firstRoundNudgeRetryWork = nil
                         Task {
                             try? await self.sessionManager.send(.responseCreate(
-                                instructions: "The question service is taking a moment — generate a location-appropriate trivia question yourself and start Round \(startingRound) right now."
+                                instructions: "The question service is temporarily unavailable. Apologize briefly and tell the player to try starting a new game later. Do not invent a question and do not call any tools."
                             ))
                         }
                     }

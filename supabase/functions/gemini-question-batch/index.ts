@@ -209,6 +209,22 @@ Deno.serve(async (req: Request) => {
     if (!Array.isArray(batch.rounds) || batch.rounds.length !== 5) {
       throw new Error("Gemini returned an invalid round count");
     }
+    for (let offset = 0; offset < 5; offset += 1) {
+      const expectedRound = request.startingRound + offset;
+      const round = batch.rounds[offset] as {
+        roundNumber?: number;
+        isLightning?: boolean;
+        questions?: unknown[];
+      };
+      const expectedQuestions = expectedRound % 5 === 0 ? 10 : 5;
+      if (
+        round.roundNumber !== expectedRound ||
+        round.isLightning !== (expectedRound % 5 === 0) ||
+        round.questions?.length !== expectedQuestions
+      ) {
+        throw new Error(`Gemini returned an invalid Round ${expectedRound}`);
+      }
+    }
 
     log("question batch generated", {
       userId,

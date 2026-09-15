@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { extractUserId } from "../_shared/ratelimit.ts";
 
 const GEMINI_AUTH_TOKENS_URL =
   "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
@@ -30,9 +31,9 @@ Deno.serve(async (req: Request) => {
 
   // Supabase's function gateway validates the JWT because verify_jwt is enabled.
   // Keep this explicit guard so a deployment configuration regression fails closed.
-  const authorization = req.headers.get("Authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    log("rejected request without bearer token");
+  const userId = extractUserId(req);
+  if (!userId) {
+    log("rejected unauthenticated request");
     return jsonResponse({ error: "Authentication required" }, 401);
   }
 
@@ -50,6 +51,7 @@ Deno.serve(async (req: Request) => {
 
     log("minting constrained ephemeral token", {
       model: MODEL,
+      userId,
       expireTime,
       newSessionExpireTime,
     });
@@ -93,6 +95,7 @@ Deno.serve(async (req: Request) => {
 
     log("issued constrained ephemeral token", {
       model: MODEL,
+      userId,
       expiresAt: expireTime,
     });
     return jsonResponse({

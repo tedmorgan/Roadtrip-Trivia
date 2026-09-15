@@ -36,6 +36,15 @@ class RoundTracker: ObservableObject {
     static let showPaywallNotification = Notification.Name("RoundTracker.showPaywall")
 
     private init() {
+        #if DEBUG
+        // Device regression builds must not consume StoreKit test-account
+        // inventory. Refill only an empty local balance; Release/TestFlight
+        // continues to use the normal purchase and subscription rules.
+        if defaults.integer(forKey: kPurchasedRounds) == 0 {
+            defaults.set(3, forKey: kPurchasedRounds)
+            print("[RoundTracker] DEBUG test balance refilled to 3 rounds")
+        }
+        #endif
         refreshCanPlay()
         roundBalance = totalRoundsAvailable
     }

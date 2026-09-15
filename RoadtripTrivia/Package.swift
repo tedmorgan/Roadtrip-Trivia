@@ -45,6 +45,7 @@ let package = Package(
                 "RoundIntroComposer.swift",
                 "NoAnswerGuardPolicy.swift",
                 "TranscriptionKeytermsBuilder.swift",
+                "IntroFlowPolicy.swift",
             ]
         ),
         .target(

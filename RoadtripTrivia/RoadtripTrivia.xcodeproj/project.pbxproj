@@ -46,6 +46,7 @@
 		A20023 /* VerdictLineComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20023 /* VerdictLineComposer.swift */; };
 		A20024 /* RoundIntroComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20024 /* RoundIntroComposer.swift */; };
 		A20025 /* NoAnswerGuardPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20025 /* NoAnswerGuardPolicy.swift */; };
+		A20027 /* IntroFlowPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20027 /* IntroFlowPolicy.swift */; };
 		A30001 /* thinking_stinger.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30001 /* thinking_stinger.mp3 */; };
 		A30002 /* correct_ching.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30002 /* correct_ching.mp3 */; };
 		A30003 /* incorrect_gong.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30003 /* incorrect_gong.mp3 */; };
@@ -99,6 +100,7 @@
 		B20023 /* VerdictLineComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerdictLineComposer.swift; sourceTree = "<group>"; };
 		B20024 /* RoundIntroComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundIntroComposer.swift; sourceTree = "<group>"; };
 		B20025 /* NoAnswerGuardPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoAnswerGuardPolicy.swift; sourceTree = "<group>"; };
+		B20027 /* IntroFlowPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntroFlowPolicy.swift; sourceTree = "<group>"; };
 		B30001 /* thinking_stinger.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = thinking_stinger.mp3; sourceTree = "<group>"; };
 		B30002 /* correct_ching.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = correct_ching.mp3; sourceTree = "<group>"; };
 		B30003 /* incorrect_gong.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = incorrect_gong.mp3; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 				B20024 /* RoundIntroComposer.swift */,
 				B20025 /* NoAnswerGuardPolicy.swift */,
 				B20026 /* TranscriptionKeytermsBuilder.swift */,
+				B20027 /* IntroFlowPolicy.swift */,
 			);
 			path = Logic;
 			sourceTree = "<group>";
@@ -451,6 +454,7 @@
 				A20024 /* RoundIntroComposer.swift in Sources */,
 				A20025 /* NoAnswerGuardPolicy.swift in Sources */,
 				A20026 /* TranscriptionKeytermsBuilder.swift in Sources */,
+				A20027 /* IntroFlowPolicy.swift in Sources */,
 				D7D30EEF2F75A1C300D76E6F /* PaywallViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -518,7 +522,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;
@@ -547,7 +551,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;

@@ -166,6 +166,8 @@ class RealtimeGameCoordinator: ObservableObject {
     private var introHostTurnsCompleted = 0
     /// Player VAD-stop count during the same setup window.
     private var introPlayerSpeechStops = 0
+    /// Player VAD-stops that arrived after the third host setup turn.
+    private var playerStopsAfterThirdHostTurn = 0
     private var setupConfigNudgeWork: DispatchWorkItem?
     private var setupConfigNudgeSent = false
     /// Tracks whether the question batch for Round 1 is ready to serve. Used
@@ -601,6 +603,7 @@ class RealtimeGameCoordinator: ObservableObject {
         cancelSetupConfigNudge()
         introHostTurnsCompleted = 0
         introPlayerSpeechStops = 0
+        playerStopsAfterThirdHostTurn = 0
         setupConfigNudgeSent = false
         lastGetNextQuestionCallId = nil
         reserveDueToCancelRewind = false
@@ -668,7 +671,9 @@ class RealtimeGameCoordinator: ObservableObject {
                 try audioService.startStreaming()
                 gameViewModel.transition(to: .playing)
 
-                try await sessionManager.send(.responseCreate(instructions: "Ask ONLY for the team name, then stop and wait for their answer."))
+                try await sessionManager.send(.responseCreate(
+                    instructions: IntroFlowPolicy.firstTurnInstructions
+                ))
                 _dbg("CONN","RealtimeGameCoordinator.swift:\(#line)","startNewGame: game started successfully",[:])
                 print("[RealtimeGame] Game started")
             } catch {
@@ -2263,7 +2268,7 @@ class RealtimeGameCoordinator: ObservableObject {
                     audioService.suspendMicForProcessing()
                     submitResultImmediate(callId: callId, name: name, result: [
                         "status": "preparing",
-                        "instruction": "Questions are still loading — give a quick enthusiastic one-liner like \"Alright, let me pull up your first question…\" and then WAIT silently. The app will tell you the instant they're ready. Do NOT call get_next_question again on your own; the app will prompt you."
+                        "instruction": IntroFlowPolicy.batchPendingInstruction
                     ])
                     return
                 }
@@ -2348,7 +2353,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 "isNewRound": isNewRound,
                 "location": location,
                 "instruction": isNewRound
-                    ? "Say the announce field VERBATIM, then 'Question \(next.questionIndex)', then read questionText VERBATIM. Do NOT paraphrase or reveal the answer. After the player answers, call report_score."
+                    ? "\(IntroFlowPolicy.doNotAnnounceLoading) Say the announce field VERBATIM, then 'Question \(next.questionIndex)', then read questionText VERBATIM. Do NOT paraphrase or reveal the answer. After the player answers, call report_score."
                     : "Say 'Question \(next.questionIndex)' then read questionText VERBATIM. Do NOT paraphrase or reveal the answer. After the player answers, call report_score."
             ]
             if isNewRound {
@@ -2555,18 +2560,24 @@ class RealtimeGameCoordinator: ObservableObject {
     private func noteIntroHostTurnCompleted() {
         guard aiDidConversationalSetup, !gameConfigAccepted, currentRoundNumber == 0 else { return }
         introHostTurnsCompleted += 1
-        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","intro host turn completed",["turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops])
-        if introHostTurnsCompleted >= 3 {
-            scheduleSetupConfigNudge(delay: 12, reason: "post-intro-timeout")
+        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","intro host turn completed",["turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops,"stopsAfterThird":playerStopsAfterThirdHostTurn])
+        if let delay = IntroFlowPolicy.timeoutAfterHostTurn(hostTurnsCompleted: introHostTurnsCompleted) {
+            scheduleSetupConfigNudge(delay: delay, reason: "post-intro-timeout")
         }
     }
 
     private func noteIntroPlayerSpeechStopped() {
         guard aiDidConversationalSetup, !gameConfigAccepted, currentRoundNumber == 0 else { return }
         introPlayerSpeechStops += 1
-        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","intro player speech stopped",["turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops])
-        if introHostTurnsCompleted >= 3 || (introPlayerSpeechStops >= 3 && introHostTurnsCompleted >= 1) {
-            scheduleSetupConfigNudge(delay: 2.5, reason: "post-intro-answer")
+        if introHostTurnsCompleted >= 3 {
+            playerStopsAfterThirdHostTurn += 1
+        }
+        _dbg("SETUP_CFG","RealtimeGameCoordinator.swift:\(#line)","intro player speech stopped",["turns":introHostTurnsCompleted,"playerStops":introPlayerSpeechStops,"stopsAfterThird":playerStopsAfterThirdHostTurn])
+        if let delay = IntroFlowPolicy.delayAfterPlayerStop(
+            hostTurnsCompleted: introHostTurnsCompleted,
+            playerStopsAfterThirdHostTurn: playerStopsAfterThirdHostTurn
+        ) {
+            scheduleSetupConfigNudge(delay: delay, reason: "post-intro-answer")
         }
     }
 
@@ -2661,8 +2672,10 @@ class RealtimeGameCoordinator: ObservableObject {
         // #endregion
         Task { [weak self] in
             guard let self else { return }
+            try? await self.sessionManager.send(.responseCancel)
+            try? await Task.sleep(nanoseconds: 200_000_000)
             try? await self.sessionManager.send(.responseCreate(
-                instructions: "Questions are ready — start Round 1 NOW by calling get_next_question immediately. Do NOT ask the player 'ready?', do NOT add filler, just call the tool."
+                instructions: IntroFlowPolicy.round1NudgeInstructions
             ))
         }
         scheduleRound1StuckEscalationAfterNudge()

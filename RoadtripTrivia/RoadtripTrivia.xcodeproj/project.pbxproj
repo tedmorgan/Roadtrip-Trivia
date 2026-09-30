@@ -34,6 +34,8 @@
 		A20030 /* GeminiLiveSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20030 /* GeminiLiveSessionManager.swift */; };
 		A20031 /* RealtimeSessionFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20031 /* RealtimeSessionFacade.swift */; };
 		A20009 /* AnswerGrader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20009 /* AnswerGrader.swift */; };
+		A20035 /* AnswerPositionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20035 /* AnswerPositionPolicy.swift */; };
+		A20099 /* DiagnosticLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20099 /* DiagnosticLog.swift */; };
 		A20010 /* FarewellScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20010 /* FarewellScript.swift */; };
 		A20011 /* PostScoreWatchdogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20011 /* PostScoreWatchdogPolicy.swift */; };
 		A20012 /* EndGamePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20012 /* EndGamePolicy.swift */; };
@@ -51,6 +53,10 @@
 		A20024 /* RoundIntroComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20024 /* RoundIntroComposer.swift */; };
 		A20025 /* NoAnswerGuardPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20025 /* NoAnswerGuardPolicy.swift */; };
 		A20027 /* IntroFlowPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20027 /* IntroFlowPolicy.swift */; };
+		A20032 /* RoundContextReseedPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20032 /* RoundContextReseedPolicy.swift */; };
+		A20033 /* QuestionDedupPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20033 /* QuestionDedupPolicy.swift */; };
+		A20100 /* QuestionReadComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20100 /* QuestionReadComposer.swift */; };
+		A20034 /* AuthAccountPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20034 /* AuthAccountPolicy.swift */; };
 		A30001 /* thinking_stinger.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30001 /* thinking_stinger.mp3 */; };
 		A30002 /* correct_ching.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30002 /* correct_ching.mp3 */; };
 		A30003 /* incorrect_gong.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B30003 /* incorrect_gong.mp3 */; };
@@ -92,6 +98,8 @@
 		B20030 /* GeminiLiveSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveSessionManager.swift; sourceTree = "<group>"; };
 		B20031 /* RealtimeSessionFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionFacade.swift; sourceTree = "<group>"; };
 		B20009 /* AnswerGrader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerGrader.swift; sourceTree = "<group>"; };
+		B20035 /* AnswerPositionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerPositionPolicy.swift; sourceTree = "<group>"; };
+		B20099 /* DiagnosticLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLog.swift; sourceTree = "<group>"; };
 		B20010 /* FarewellScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarewellScript.swift; sourceTree = "<group>"; };
 		B20011 /* PostScoreWatchdogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostScoreWatchdogPolicy.swift; sourceTree = "<group>"; };
 		B20012 /* EndGamePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndGamePolicy.swift; sourceTree = "<group>"; };
@@ -109,6 +117,10 @@
 		B20024 /* RoundIntroComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundIntroComposer.swift; sourceTree = "<group>"; };
 		B20025 /* NoAnswerGuardPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoAnswerGuardPolicy.swift; sourceTree = "<group>"; };
 		B20027 /* IntroFlowPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntroFlowPolicy.swift; sourceTree = "<group>"; };
+		B20032 /* RoundContextReseedPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundContextReseedPolicy.swift; sourceTree = "<group>"; };
+		B20033 /* QuestionDedupPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionDedupPolicy.swift; sourceTree = "<group>"; };
+		B20100 /* QuestionReadComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionReadComposer.swift; sourceTree = "<group>"; };
+		B20034 /* AuthAccountPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthAccountPolicy.swift; sourceTree = "<group>"; };
 		B30001 /* thinking_stinger.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = thinking_stinger.mp3; sourceTree = "<group>"; };
 		B30002 /* correct_ching.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = correct_ching.mp3; sourceTree = "<group>"; };
 		B30003 /* incorrect_gong.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = incorrect_gong.mp3; sourceTree = "<group>"; };
@@ -229,6 +241,8 @@
 			isa = PBXGroup;
 			children = (
 				B20009 /* AnswerGrader.swift */,
+				B20035 /* AnswerPositionPolicy.swift */,
+				B20099 /* DiagnosticLog.swift */,
 				B20010 /* FarewellScript.swift */,
 				B20011 /* PostScoreWatchdogPolicy.swift */,
 				B20012 /* EndGamePolicy.swift */,
@@ -247,6 +261,10 @@
 				B20025 /* NoAnswerGuardPolicy.swift */,
 				B20026 /* TranscriptionKeytermsBuilder.swift */,
 				B20027 /* IntroFlowPolicy.swift */,
+				B20032 /* RoundContextReseedPolicy.swift */,
+				B20033 /* QuestionDedupPolicy.swift */,
+				B20100 /* QuestionReadComposer.swift */,
+				B20034 /* AuthAccountPolicy.swift */,
 			);
 			path = Logic;
 			sourceTree = "<group>";
@@ -453,6 +471,8 @@
 				A20006 /* APIUsageLogger.swift in Sources */,
 				A20008 /* QuestionBatchService.swift in Sources */,
 				A20009 /* AnswerGrader.swift in Sources */,
+				A20035 /* AnswerPositionPolicy.swift in Sources */,
+				A20099 /* DiagnosticLog.swift in Sources */,
 				A20010 /* FarewellScript.swift in Sources */,
 				A20011 /* PostScoreWatchdogPolicy.swift in Sources */,
 				A20012 /* EndGamePolicy.swift in Sources */,
@@ -471,6 +491,10 @@
 				A20025 /* NoAnswerGuardPolicy.swift in Sources */,
 				A20026 /* TranscriptionKeytermsBuilder.swift in Sources */,
 				A20027 /* IntroFlowPolicy.swift in Sources */,
+				A20032 /* RoundContextReseedPolicy.swift in Sources */,
+				A20033 /* QuestionDedupPolicy.swift in Sources */,
+				A20100 /* QuestionReadComposer.swift in Sources */,
+				A20034 /* AuthAccountPolicy.swift in Sources */,
 				D7D30EEF2F75A1C300D76E6F /* PaywallViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -538,7 +562,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 57;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;
@@ -567,7 +591,7 @@
 				CODE_SIGN_ENTITLEMENTS = RoadtripTrivia/RoadtripTrivia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 57;
 				DEVELOPMENT_TEAM = GL9U974DM2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoadtripTrivia/Info.plist;

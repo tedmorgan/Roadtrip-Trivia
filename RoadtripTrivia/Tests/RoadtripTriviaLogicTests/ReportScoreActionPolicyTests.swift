@@ -142,6 +142,8 @@ final class ReportScoreActionPolicyTests: XCTestCase {
                       "AI must not start another question: \(text)")
         XCTAssertTrue(text.contains("Do NOT ask if they want to play again"),
                       "AI must not solicit a new game: \(text)")
+        XCTAssertTrue(text.contains("Do NOT speak"),
+                      "the host must stay quiet so the app can speak the verdict: \(text)")
     }
 
     // MARK: - End-to-end log replay
@@ -202,5 +204,39 @@ final class ReportScoreActionPolicyTests: XCTestCase {
             ReportScoreOutcome.roundCompleteContinue(roundsLeft: 1),
             ReportScoreOutcome.roundCompleteContinue(roundsLeft: 1)
         )
+    }
+
+    func test_lightningTimedOut_neverAsksContinue() {
+        let outcome = ReportScoreActionPolicy.decide(
+            questionIndex: 7,
+            isLightningRound: false,
+            canPlayRound: true,
+            roundsLeftAfterScoring: 1,
+            lightningTimedOut: true
+        )
+        XCTAssertEqual(outcome, .lightningTimeUp)
+        let text = ReportScoreActionPolicy.nextActionText(for: outcome)
+        XCTAssertTrue(text.contains("TIME IS UP"))
+        XCTAssertTrue(text.contains("Do NOT ask if they want to continue"))
+        XCTAssertTrue(text.contains("Do NOT call get_next_question"))
+    }
+
+    func test_fourQuestionRoundCompletesOnQ4() {
+        let mid = ReportScoreActionPolicy.decide(
+            questionIndex: 3,
+            isLightningRound: false,
+            canPlayRound: true,
+            roundsLeftAfterScoring: 2,
+            questionsInRound: 4
+        )
+        XCTAssertEqual(mid, .midRound)
+        let done = ReportScoreActionPolicy.decide(
+            questionIndex: 4,
+            isLightningRound: false,
+            canPlayRound: true,
+            roundsLeftAfterScoring: 2,
+            questionsInRound: 4
+        )
+        XCTAssertEqual(done, .roundCompleteContinue(roundsLeft: 2))
     }
 }

@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireUser } from "../_shared/requireUser.ts";
 
 /// Mint a short-lived xAI Realtime client secret for the iOS app.
 ///
@@ -39,6 +40,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const caller = await requireUser(req);
+    if (!("id" in caller)) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required", detail: caller.error }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     // Trim / strip accidental quotes from dashboard paste.
     const rawKey = Deno.env.get("XAI_API_KEY") ?? "";
     const apiKey = rawKey.trim().replace(/^['"]|['"]$/g, "");

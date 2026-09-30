@@ -114,9 +114,9 @@ final class RealtimeSessionManager: ObservableObject, LiveSessionManaging {
     }
 
     private static func geminiVoice(from requested: String) -> String {
-        let supported = ["Puck", "Fenrir", "Laomedeia"]
+        let supported = ["Orus", "Sadachbia", "Puck", "Fenrir", "Laomedeia"]
         return supported.first {
             $0.caseInsensitiveCompare(requested) == .orderedSame
-        } ?? "Puck"
+        } ?? "Orus"
     }
 }

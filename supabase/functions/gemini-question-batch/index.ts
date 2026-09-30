@@ -1,5 +1,6 @@
 import { corsHeaders } from "../_shared/cors.ts";
-import { checkRateLimit, extractUserId } from "../_shared/ratelimit.ts";
+import { checkRateLimit } from "../_shared/ratelimit.ts";
+import { requireUser } from "../_shared/requireUser.ts";
 
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -88,6 +89,7 @@ For multiple choice, randomize which letter (A-D) is correct for each question.
 
 BANNED TOPICS — do not generate questions covering these subjects:
 ${history}
+Treat paraphrases as the same topic. "largest hot desert on Earth" is the same as "largest desert in the world". Do not reuse a fact even if the wording differs.
 Every question must be on a completely different topic from the banned list.
 
 Return ONLY valid JSON in this exact shape:
@@ -126,11 +128,12 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  const userId = extractUserId(req);
-  if (!userId) {
-    log("rejected unauthenticated request");
-    return jsonResponse({ error: "Authentication required" }, 401);
+  const user = await requireUser(req);
+  if (!("id" in user)) {
+    log("rejected unauthenticated request", { reason: user.error });
+    return jsonResponse({ error: "Authentication required", detail: user.error }, 401);
   }
+  const userId = user.id;
 
   try {
     const apiKey = (Deno.env.get("GEMINI_API_KEY") ?? "")

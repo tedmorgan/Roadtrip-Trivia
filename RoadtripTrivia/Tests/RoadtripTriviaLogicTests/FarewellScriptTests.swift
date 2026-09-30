@@ -5,6 +5,19 @@ final class FarewellScriptTests: XCTestCase {
 
     // MARK: - Chain shape
 
+    func test_verdictIsSpokenBeforeTheScoreSummary() {
+        let chain = FarewellScript.makeNoRoundsChain(
+            finalScore: 400,
+            roundsPlayed: 1,
+            context: "report_score_no_rounds_left",
+            verdict: "Not quite — the answer was Highland Light. Your total stays at 400 points."
+        )
+        XCTAssertEqual(chain.count, 4)
+        XCTAssertTrue(chain[0].spokenText.contains("Highland Light"))
+        XCTAssertTrue(chain[1].spokenText.contains("400 points"))
+        XCTAssertTrue(chain[1].spokenText.contains("1 round."))
+    }
+
     func test_makeNoRoundsChain_returnsThreeChunks() {
         let chain = FarewellScript.makeNoRoundsChain(
             finalScore: 10,

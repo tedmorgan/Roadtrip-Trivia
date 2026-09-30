@@ -21,8 +21,8 @@ enum IntroFlowPolicy {
     static let newGameSetupBlock = """
         NEW GAME SETUP — ask ONE question per turn, WAIT for the answer, then ask the next:
         Open with "\(welcomeLine)" then ask ONLY for their team name — STOP and wait.
-        Next: Ask ONLY about ages: "Are the players kids, teens, adults, or a mix?" — STOP and wait. \
-        If the reply is unclear or just noise, ask ages again. Do NOT skip to difficulty.
+        Next: Ask ONLY about ages, exactly once: "Are the players kids, teens, adults, or a mix?" — STOP and wait. \
+        Do not ask ages again. Any reply is the ages answer, even if it is short. Do NOT skip to difficulty.
         Next: Ask ONLY which difficulty: "Pick your difficulty: Simple, Tricky, Wicked Hard, or Einstein. Which one?" — STOP and wait.
         After all 3 answers, do NOT speak — call set_game_config exactly once (playerCount=1) NOW.
         """

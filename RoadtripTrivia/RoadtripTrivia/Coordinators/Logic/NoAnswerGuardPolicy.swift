@@ -89,7 +89,7 @@ public enum NoAnswerGuardPolicy {
         lastPlayerSpeechAt: Date?,
         answerWindowOpenedAt: Date?,
         questionServedAt: Date?,
-        prerollGrace: TimeInterval = 2.5
+        prerollGrace: TimeInterval = 0.8
     ) -> Bool {
         if let windowStart = answerWindowOpenedAt {
             guard let spoke = lastPlayerSpeechAt else { return false }

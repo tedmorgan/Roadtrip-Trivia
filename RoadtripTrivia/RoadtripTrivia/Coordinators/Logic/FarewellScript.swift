@@ -30,7 +30,8 @@ enum FarewellScript {
     static func makeNoRoundsChain(
         finalScore: Int,
         roundsPlayed: Int,
-        context: String
+        context: String,
+        verdict: String? = nil
     ) -> [FarewellChunk] {
         let summarySentence: String
         if roundsPlayed > 0 {
@@ -43,10 +44,17 @@ enum FarewellScript {
         let goodbyeSpoken = "Thanks for playing Roadtrip Trivia! Come back soon."
 
         _ = context
-        return [
-            FarewellChunk(spokenText: "Great game! \(summarySentence)"),
-            FarewellChunk(spokenText: purchaseSpoken),
-            FarewellChunk(spokenText: goodbyeSpoken)
-        ]
+        // The verdict is spoken by the app, not the model. On the last
+        // question the goodbye used to start immediately and cut off
+        // "the answer was…". It is the first forced line when present.
+        let verdictLine = verdict?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var chunks: [FarewellChunk] = []
+        if !verdictLine.isEmpty {
+            chunks.append(FarewellChunk(spokenText: verdictLine))
+        }
+        chunks.append(FarewellChunk(spokenText: "Great game! \(summarySentence)"))
+        chunks.append(FarewellChunk(spokenText: purchaseSpoken))
+        chunks.append(FarewellChunk(spokenText: goodbyeSpoken))
+        return chunks
     }
 }

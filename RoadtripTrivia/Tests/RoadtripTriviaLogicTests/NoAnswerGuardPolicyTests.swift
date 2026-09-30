@@ -105,9 +105,18 @@ final class NoAnswerGuardPolicyTests: XCTestCase {
 
     func test_playerProvidedAnswer_countsRealAnswerAfterGrace() {
         let windowOpen = Date()
-        let realAnswer = windowOpen.addingTimeInterval(3.0) // spoke after echo-tail grace
+        let realAnswer = windowOpen.addingTimeInterval(1.0) // spoke after echo-tail grace
         XCTAssertTrue(NoAnswerGuardPolicy.playerProvidedAnswer(
             lastPlayerSpeechAt: realAnswer,
+            answerWindowOpenedAt: windowOpen,
+            questionServedAt: windowOpen.addingTimeInterval(-10)
+        ))
+    }
+
+    func test_playerProvidedAnswer_acceptsAnswerJustAfterShortGrace() {
+        let windowOpen = Date()
+        XCTAssertTrue(NoAnswerGuardPolicy.playerProvidedAnswer(
+            lastPlayerSpeechAt: windowOpen.addingTimeInterval(0.81),
             answerWindowOpenedAt: windowOpen,
             questionServedAt: windowOpen.addingTimeInterval(-10)
         ))

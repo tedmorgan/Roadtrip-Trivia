@@ -68,6 +68,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         print("[AppDelegate] App launched")
+        // Clears diagnostic files left by a build that logged
+        // unconditionally, before anything can append to them.
+        DiagnosticLog.applyAtLaunch()
         AudioSessionManager.shared.configureForCarPlay()
         ConnectionMonitor.shared.start()
 

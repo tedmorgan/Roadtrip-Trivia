@@ -78,6 +78,19 @@ struct TurnRecoveryGovernor {
         return .allow
     }
 
+    /// A spacing denial means another recovery just fired. Reconnecting on
+    /// that denial killed the session at the end of Round 3 (2026-09-27):
+    /// the post-score nudge and the cancelled tool call were 0.47s apart.
+    /// Only a spent per-question budget means the turn is actually stuck.
+    static func shouldReconnect(after verdict: Verdict) -> Bool {
+        switch verdict {
+        case .denyNudgeBudget, .denyCancelBudget:
+            return true
+        case .allow, .denySpacing:
+            return false
+        }
+    }
+
     /// Record an executed action. Call only after `decide` returned `.allow`
     /// (or for reconnect escalations, unconditionally).
     static func record(kind: ActionKind, now: Double, state: inout State) {

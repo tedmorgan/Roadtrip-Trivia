@@ -21,6 +21,7 @@ test:
 		"$(SWIFT)" test \
 		--cache-path "$(CACHE_DIR)/cache" \
 		--build-path "$(BUILD_DIR)"
+	deno test --allow-read "$(CURDIR)/../supabase/functions/_shared/supportPolicy_test.ts" "$(CURDIR)/../supabase/functions/_shared/liveAuth_test.ts"
 
 test-clean:
 	rm -rf "$(BUILD_DIR)" "$(CACHE_DIR)"

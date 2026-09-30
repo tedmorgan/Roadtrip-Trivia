@@ -132,4 +132,13 @@ final class TurnRecoveryGovernorTests: XCTestCase {
             "this is the loop we fixed: resetting on a recovery re-serve re-arms the cancel budget"
         )
     }
+
+    func test_spacingDenialDoesNotReconnect() {
+        XCTAssertFalse(
+            TurnRecoveryGovernor.shouldReconnect(after: .denySpacing(secondsSinceLast: 0.47))
+        )
+        XCTAssertTrue(
+            TurnRecoveryGovernor.shouldReconnect(after: .denyNudgeBudget(used: 3))
+        )
+    }
 }

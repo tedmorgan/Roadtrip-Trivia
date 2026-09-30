@@ -121,6 +121,7 @@ class StoreService: ObservableObject {
 
         // Notify RoundTracker that subscription state changed
         RoundTracker.shared.refreshCanPlay()
+        AuthService.shared.syncRoundLedger()
 
         print("[Store] Active subscriptions: \(activeIDs)")
     }

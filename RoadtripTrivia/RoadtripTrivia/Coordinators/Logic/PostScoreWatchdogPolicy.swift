@@ -110,7 +110,9 @@ public enum PostScoreWatchdogPolicy {
         reason: PostScoreReason,
         secondsSinceLastToolEvent: TimeInterval = .infinity,
         recentAudioWindowSeconds: TimeInterval = 2.0,
-        toolQuietWindowSeconds: TimeInterval = 12.0
+        toolQuietWindowSeconds: TimeInterval = 12.0,
+        audioStallCapSeconds: TimeInterval = 15.0,
+        playbackStillDraining: Bool = false
     ) -> PostScoreAction {
         guard sessionAlive else {
             return .skip(reason: "session ended")
@@ -121,8 +123,24 @@ public enum PostScoreWatchdogPolicy {
         if phase == .speaking {
             return .reArm(reason: "host speaking")
         }
+        // Gemini marks the turn done while the speaker is still playing the
+        // verdict. A nudge here is a new model turn, which cancels the tool
+        // call and chops the answer (2026-09-27 R3Q4 / R3Q5).
+        if playbackStillDraining {
+            return .reArm(reason: "host playback still draining")
+        }
         if secondsSinceLastAudioDelta < recentAudioWindowSeconds {
             return .reArm(reason: "recent host audio (\(String(format: "%.2f", secondsSinceLastAudioDelta))s)")
+        }
+        // A long, finite silence means the host already stopped talking.
+        // Waiting out the tool-quiet window here is what left Science Q2
+        // silent for ~26s on 2026-09-24 before the nudge was even allowed
+        // to fire. `.infinity` (no audio since the score) stays on the
+        // tool-quiet path so we do not interrupt a verdict still composing.
+        if reason == .armed,
+           secondsSinceLastAudioDelta.isFinite,
+           secondsSinceLastAudioDelta >= audioStallCapSeconds {
+            return .fireHard
         }
         // Tool-quiet guard: only meaningful in the `.armed` window, where the
         // model may still be silently composing its verdict+get_next response

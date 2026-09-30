@@ -4,7 +4,8 @@ import Combine
 // #region agent log
 private let _dbgWSPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first! + "/debug-30dda1.log"
 private func _dbgWS(_ loc: String, _ msg: String, _ data: [String: Any] = [:]) {
-    let entry: [String: Any] = ["sessionId":"30dda1","hypothesisId":"WS","location":loc,"message":msg,"data":data,"timestamp":Date().timeIntervalSince1970*1000]
+    guard DiagnosticLog.isEnabled else { return }
+    let entry: [String: Any] = ["sessionId":"30dda1","hypothesisId":"WS","location":loc,"message":msg,"data":DiagnosticLog.redactingSensitiveKeys(data),"timestamp":Date().timeIntervalSince1970*1000]
     guard let d = try? JSONSerialization.data(withJSONObject: entry), let line = String(data: d, encoding: .utf8) else { return }
     if !FileManager.default.fileExists(atPath: _dbgWSPath) { FileManager.default.createFile(atPath: _dbgWSPath, contents: nil) }
     guard let h = FileHandle(forWritingAtPath: _dbgWSPath) else { return }

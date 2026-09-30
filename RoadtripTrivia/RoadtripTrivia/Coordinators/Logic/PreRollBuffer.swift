@@ -34,8 +34,13 @@ struct PreRollBuffer {
 
     mutating func append(base64Audio: String, hasVoice: Bool) {
         chunks.append(Chunk(base64Audio: base64Audio, hasVoice: hasVoice))
-        if chunks.count > maxChunks {
-            chunks.removeFirst(chunks.count - maxChunks)
+        // `suffix` never traps if count races below maxChunks. `removeFirst(n)`
+        // fatals when n > count (Build 44 crash: EXC_BREAKPOINT in
+        // PreRollBuffer.append on RealtimeMessenger.mServiceQueue).
+        if maxChunks <= 0 {
+            chunks.removeAll()
+        } else if chunks.count > maxChunks {
+            chunks = Array(chunks.suffix(maxChunks))
         }
     }
 

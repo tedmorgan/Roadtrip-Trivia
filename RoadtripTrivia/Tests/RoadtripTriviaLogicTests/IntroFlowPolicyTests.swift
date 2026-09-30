@@ -22,7 +22,8 @@ final class IntroFlowPolicyTests: XCTestCase {
     func test_setupCopy_requiresStopAndWaitOnAges() {
         let block = IntroFlowPolicy.newGameSetupBlock
         XCTAssertTrue(block.contains("STOP and wait"))
-        XCTAssertTrue(block.localizedCaseInsensitiveContains("ages"))
+        XCTAssertTrue(block.localizedCaseInsensitiveContains("exactly once"))
+        XCTAssertTrue(block.localizedCaseInsensitiveContains("do not ask ages again"))
         XCTAssertTrue(block.contains("Do NOT skip to difficulty"))
     }
 

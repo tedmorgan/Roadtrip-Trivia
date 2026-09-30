@@ -17,7 +17,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { chatCompletion } from "../_shared/openai.ts";
-import { checkRateLimit, extractUserId } from "../_shared/ratelimit.ts";
+import { checkRateLimit } from "../_shared/ratelimit.ts";
+import { requireUser } from "../_shared/requireUser.ts";
 
 interface GenerateRequest {
   locationLabel: string;
@@ -35,15 +36,25 @@ serve(async (req: Request) => {
 
   try {
     // Rate limiting (COST-05)
-    const userId = extractUserId(req);
-    if (userId) {
-      const limit = await checkRateLimit(userId, "generate");
-      if (!limit.allowed) {
-        return new Response(JSON.stringify({ error: limit.message }), {
+    // The caller's token is verified against Auth, not just decoded:
+    // a decoded `sub` can be forged, and an unauthenticated caller used
+    // to skip the daily limit entirely.
+    const caller = await requireUser(req);
+    if (!("id" in caller)) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required", detail: caller.error }),
+        {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 429,
-        });
-      }
+          status: 401,
+        },
+      );
+    }
+    const limit = await checkRateLimit(caller.id, "generate");
+    if (!limit.allowed) {
+      return new Response(JSON.stringify({ error: limit.message }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 429,
+      });
     }
 
     const body: GenerateRequest = await req.json();
@@ -55,8 +66,9 @@ serve(async (req: Request) => {
       excludeCategories,
     } = body;
 
+    // Location label is player context; kept out of the function log.
     console.log(
-      `[generate-questions] Round ${roundNumber}, difficulty: ${difficulty}, location: ${locationLabel}`
+      `[generate-questions] Round ${roundNumber}, difficulty: ${difficulty}`
     );
 
     // Build the system prompt per PRD requirements

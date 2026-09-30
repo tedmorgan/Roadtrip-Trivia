@@ -28,6 +28,7 @@ let package = Package(
             path: "RoadtripTrivia/Coordinators/Logic",
             sources: [
                 "AnswerGrader.swift",
+                "AnswerPositionPolicy.swift",
                 "FarewellScript.swift",
                 "PostScoreWatchdogPolicy.swift",
                 "EndGamePolicy.swift",
@@ -46,10 +47,16 @@ let package = Package(
                 "NoAnswerGuardPolicy.swift",
                 "TranscriptionKeytermsBuilder.swift",
                 "IntroFlowPolicy.swift",
+                "RoundContextReseedPolicy.swift",
+                "QuestionDedupPolicy.swift",
+                "QuestionReadComposer.swift",
+                "AuthAccountPolicy.swift",
+                "DiagnosticLog.swift",
             ]
         ),
         .target(
             name: "RoadtripTriviaRealtime",
+            dependencies: ["RoadtripTriviaLogic"],
             path: "RoadtripTrivia/Services/Realtime",
             exclude: [
                 "RealtimeSessionManager.swift",

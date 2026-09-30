@@ -1,5 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
-import { extractUserId } from "../_shared/ratelimit.ts";
+import { requireUser } from "../_shared/requireUser.ts";
 
 const GEMINI_AUTH_TOKENS_URL =
   "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
@@ -29,13 +29,12 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  // Supabase's function gateway validates the JWT because verify_jwt is enabled.
-  // Keep this explicit guard so a deployment configuration regression fails closed.
-  const userId = extractUserId(req);
-  if (!userId) {
-    log("rejected unauthenticated request");
-    return jsonResponse({ error: "Authentication required" }, 401);
+  const user = await requireUser(req);
+  if (!("id" in user)) {
+    log("rejected unauthenticated request", { reason: user.error });
+    return jsonResponse({ error: "Authentication required", detail: user.error }, 401);
   }
+  const userId = user.id;
 
   try {
     const apiKey = (Deno.env.get("GEMINI_API_KEY") ?? "")

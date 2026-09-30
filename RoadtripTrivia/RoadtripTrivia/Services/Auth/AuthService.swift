@@ -14,9 +14,12 @@ class AuthService: NSObject, ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var currentUserID: String?
     @Published private(set) var currentEmail: String?
+    @Published private(set) var currentUsername: String?
 
     /// Bearer token for Supabase Edge Function API calls
     private(set) var currentToken: String?
+
+    private var refreshInFlight: Task<String?, Never>?
 
     // Supabase project config
     private let supabaseURL = "https://kakhzbcuudkrrktkobjs.supabase.co"
@@ -126,7 +129,7 @@ class AuthService: NSObject, ObservableObject {
                     self.handleAuthResponse(data: data, completion: completion)
                 } else {
                     let respBody = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                    print("[Auth] Supabase Apple id_token failed — \(respBody.prefix(300))")
+                    print("[Auth] Supabase Apple id_token failed")
                     print("[Auth] Falling back to local Apple credential")
                     self.acceptAppleCredentialLocally(credential: credential, completion: completion)
                 }
@@ -163,19 +166,36 @@ class AuthService: NSObject, ObservableObject {
         currentEmail = email
         isAuthenticated = true
 
-        print("[Auth] Apple sign-in succeeded (local) — user: \(userId), email: \(email ?? "hidden")")
+        print("[Auth] Apple sign-in succeeded (local)")
         completion(true)
     }
 
     // MARK: - Email/Password (AUTH-01)
 
-    func signUpWithEmail(email: String, password: String, completion: @escaping (Bool, String?) -> Void) {
+    func signUpWithEmail(
+        email: String,
+        password: String,
+        username: String? = nil,
+        completion: @escaping (Bool, String?) -> Void
+    ) {
+        let validation = AuthAccountPolicy.validateCreateAccount(
+            .init(username: username ?? "", email: email, password: password)
+        )
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+
         let url = URL(string: "\(supabaseURL)/auth/v1/signup")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": email, "password": password])
+        var payload: [String: Any] = ["email": email, "password": password]
+        if let username {
+            payload["data"] = ["username": username]
+        }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
         print("[Auth] signUp request → \(url.absoluteString)")
         urlSession.dataTask(with: request) { [weak self] data, response, error in
@@ -187,7 +207,7 @@ class AuthService: NSObject, ObservableObject {
                 }
                 print("[Auth] signUp response: HTTP \(http.statusCode)")
                 if let body = String(data: data, encoding: .utf8) {
-                    print("[Auth] signUp body: \(body.prefix(500))")
+                    print("[Auth] signUp failed — see status code above")
                 }
                 if http.statusCode == 200 || http.statusCode == 201 {
                     // Supabase returns tokens only when email confirmation is disabled.
@@ -206,6 +226,30 @@ class AuthService: NSObject, ObservableObject {
                 }
             }
         }.resume()
+    }
+
+    func signInWithIdentifier(identifier: String, password: String, completion: @escaping (Bool, String?) -> Void) {
+        let validation = AuthAccountPolicy.validateSignIn(.init(identifier: identifier, password: password))
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+        if AuthAccountPolicy.classifyIdentifier(identifier) == .email {
+            signInWithEmail(email: identifier, password: password, completion: completion)
+            return
+        }
+        invokeAccountRecovery(
+            action: "sign_in",
+            fields: ["identifier": identifier, "password": password]
+        ) { [weak self] ok, data, message in
+            guard let self, ok, let data else {
+                completion(false, message ?? "Invalid email or password")
+                return
+            }
+            self.handleAuthResponse(data: data) { success in
+                completion(success, success ? nil : "Sign in failed")
+            }
+        }
     }
 
     func signInWithEmail(email: String, password: String, completion: @escaping (Bool, String?) -> Void) {
@@ -234,35 +278,92 @@ class AuthService: NSObject, ObservableObject {
     // MARK: - Magic Link (AUTH-01)
 
     func sendMagicLink(email: String, completion: @escaping (Bool, String?) -> Void) {
-        let url = URL(string: "\(supabaseURL)/auth/v1/magiclink")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": email])
-
-        urlSession.dataTask(with: request) { _, response, error in
-            DispatchQueue.main.async {
-                let ok = (response as? HTTPURLResponse)?.statusCode == 200
-                completion(ok, ok ? nil : "Failed to send magic link")
-            }
-        }.resume()
+        let validation = AuthAccountPolicy.validateMagicLink(email: email)
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+        invokeAccountRecovery(action: "magic_link", fields: ["email": email]) { ok, _, message in
+            completion(
+                ok,
+                ok
+                    ? AuthAccountPolicy.recoveryAcknowledgement(for: .magicLink)
+                    : (message ?? "Failed to send sign-in link")
+            )
+        }
     }
 
-    // MARK: - Password Reset
+    // MARK: - Password Reset / Username Recovery
 
     func sendPasswordReset(email: String, completion: @escaping (Bool, String?) -> Void) {
-        let url = URL(string: "\(supabaseURL)/auth/v1/recover")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": email])
+        requestPasswordReset(identifier: email, completion: completion)
+    }
 
-        urlSession.dataTask(with: request) { _, response, error in
+    func requestPasswordReset(identifier: String, completion: @escaping (Bool, String?) -> Void) {
+        let validation = AuthAccountPolicy.validateForgotPassword(identifier: identifier)
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+        invokeAccountRecovery(action: "forgot_password", fields: ["identifier": identifier]) { ok, _, message in
+            completion(
+                ok,
+                ok
+                    ? AuthAccountPolicy.recoveryAcknowledgement(for: .forgotPassword)
+                    : (message ?? "Failed to send password reset")
+            )
+        }
+    }
+
+    func requestUsernameReminder(email: String, completion: @escaping (Bool, String?) -> Void) {
+        let validation = AuthAccountPolicy.validateForgotUsername(email: email)
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+        invokeAccountRecovery(action: "forgot_username", fields: ["email": email]) { ok, _, message in
+            completion(
+                ok,
+                ok
+                    ? AuthAccountPolicy.recoveryAcknowledgement(for: .forgotUsername)
+                    : (message ?? "Failed to send username reminder")
+            )
+        }
+    }
+
+    func setUsername(_ username: String, completion: @escaping (Bool, String?) -> Void) {
+        let validation = AuthAccountPolicy.validateUsername(username)
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+        guard let token = currentToken, let userId = currentUserID,
+              let normalized = AuthAccountPolicy.normalizedUsername(username) else {
+            completion(false, "Sign in to set a username")
+            return
+        }
+        let url = URL(string: "\(supabaseURL)/rest/v1/profiles?id=eq.\(userId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "username": username,
+            "username_normalized": normalized,
+        ])
+        urlSession.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
-                let ok = (response as? HTTPURLResponse)?.statusCode == 200
-                completion(ok, ok ? nil : "Failed to send password reset email")
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                    let msg = data.flatMap { self?.parseError(data: $0) }
+                        ?? "That username is taken"
+                    completion(false, msg)
+                    return
+                }
+                self?.currentUsername = username
+                self?.saveToKeychain(key: "username", value: username)
+                completion(true, nil)
             }
         }.resume()
     }
@@ -295,6 +396,7 @@ class AuthService: NSObject, ObservableObject {
                 completion(email)
             }
         }.resume()
+        fetchProfileAndEntitlements()
     }
 
     // MARK: - Google Sign-In (AUTH-01, OAuth via Supabase)
@@ -320,22 +422,31 @@ class AuthService: NSObject, ObservableObject {
     private var googleSignInCompletion: ((Bool, String?) -> Void)?
     private weak var googleSafariVC: SFSafariViewController?
 
-    /// Handle the OAuth callback URL from Google Sign-In.
+    static let passwordRecoveryNotification = Notification.Name("RoadtripTriviaPasswordRecovery")
+
+    /// Handle an auth callback from Google, a magic link, or a password reset.
     /// Call this from your SceneDelegate/AppDelegate URL handler.
     func handleGoogleCallback(url: URL) {
         googleSafariVC?.dismiss(animated: true)
 
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let fragment = components.fragment else {
+        guard url.scheme == "roadtriptrivia" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             googleSignInCompletion?(false, "Invalid callback URL")
             googleSignInCompletion = nil
             return
         }
 
-        let params = fragment.split(separator: "&").reduce(into: [String: String]()) { result, pair in
+        var params: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            if let value = item.value { params[item.name] = value.removingPercentEncoding ?? value }
+        }
+        let fragment = components.fragment ?? ""
+        for pair in fragment.split(separator: "&") {
             let parts = pair.split(separator: "=", maxSplits: 1)
             if parts.count == 2 {
-                result[String(parts[0])] = String(parts[1])
+                let key = String(parts[0])
+                let raw = String(parts[1])
+                params[key] = raw.removingPercentEncoding ?? raw
             }
         }
 
@@ -359,12 +470,91 @@ class AuthService: NSObject, ObservableObject {
             saveToKeychain(key: "userEmail", value: email)
         }
         isAuthenticated = true
-        print("[Auth] Google sign-in successful — user: \(currentUserID ?? "unknown")")
+        print("[Auth] Auth callback successful — type: \(params["type"] ?? "oauth")")
+        fetchProfileAndEntitlements()
         googleSignInCompletion?(true, nil)
         googleSignInCompletion = nil
+        if params["type"] == "recovery" {
+            NotificationCenter.default.post(name: Self.passwordRecoveryNotification, object: nil)
+        }
+    }
+
+    func updatePassword(_ password: String, completion: @escaping (Bool, String?) -> Void) {
+        let validation = AuthAccountPolicy.validatePassword(password)
+        guard validation.isValid else {
+            completion(false, validation.message)
+            return
+        }
+        guard let token = currentToken else {
+            completion(false, "Open the reset link again, then choose a password")
+            return
+        }
+        let url = URL(string: "\(supabaseURL)/auth/v1/user")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["password": password])
+        urlSession.dataTask(with: request) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                    let message = data.flatMap { self?.parseError(data: $0) } ?? "Could not update the password"
+                    completion(false, message)
+                    return
+                }
+                completion(true, nil)
+            }
+        }.resume()
     }
 
     // MARK: - Silent Token Refresh (AUTH-02, UC-32)
+
+    /// Access token for an Edge Function call. Refreshes when the stored
+    /// token is missing or within a minute of expiry, so a session left
+    /// open overnight is not sent to Auth as an expired JWT.
+    func accessTokenForRequests() async -> String? {
+        if let token = currentToken, !Self.jwtExpires(within: 60, token: token) {
+            return token
+        }
+        if let refreshInFlight {
+            return await refreshInFlight.value
+        }
+        let task = Task { () -> String? in
+            await withCheckedContinuation { continuation in
+                self.silentReauthenticate { success in
+                    continuation.resume(returning: success ? self.currentToken : nil)
+                }
+            }
+        }
+        refreshInFlight = task
+        let token = await task.value
+        refreshInFlight = nil
+        return token
+    }
+
+    private static func jwtExpires(within seconds: TimeInterval, token: String) -> Bool {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return true }
+        var b64 = String(parts[1])
+        while b64.count % 4 != 0 { b64.append("=") }
+        b64 = b64.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        guard let data = Data(base64Encoded: b64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return true
+        }
+        let exp: TimeInterval
+        if let value = json["exp"] as? TimeInterval {
+            exp = value
+        } else if let value = json["exp"] as? Int {
+            exp = TimeInterval(value)
+        } else if let value = json["exp"] as? NSNumber {
+            exp = value.doubleValue
+        } else {
+            return true
+        }
+        return Date().timeIntervalSince1970 > exp - seconds
+    }
 
     /// Refresh session using stored refresh token.
     /// Per PRD: user should never see a re-login prompt.
@@ -408,6 +598,7 @@ class AuthService: NSObject, ObservableObject {
             request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
             urlSession.dataTask(with: request).resume()
         }
+        RoundTracker.shared.clearAccountCompensation()
         clearLocalAuth()
     }
 
@@ -429,9 +620,21 @@ class AuthService: NSObject, ObservableObject {
         request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_user_id": userId])
 
-        urlSession.dataTask(with: request) { [weak self] _, _, _ in
+        // Local data is cleared only once the server confirms. Reporting
+        // success on a failed call would leave the account live on the
+        // server while the phone looks signed out, which is the opposite
+        // of what Delete Account promises.
+        urlSession.dataTask(with: request) { [weak self] _, response, error in
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let deleted = error == nil && (200...299).contains(code)
             DispatchQueue.main.async {
+                guard deleted else {
+                    print("[Auth] \(ISO8601DateFormatter().string(from: Date())) account deletion failed \(code)")
+                    completion(false)
+                    return
+                }
                 self?.clearLocalAuth()
+                RoundTracker.shared.clearAccountCompensation()
                 SessionPersistenceService.shared.clearAllData()
                 completion(true)
             }
@@ -469,27 +672,146 @@ class AuthService: NSObject, ObservableObject {
             return decodeEmailFromJWT(accessToken)
         }()
 
+        let username: String? = {
+            if let user = json["user"] as? [String: Any],
+               let meta = user["user_metadata"] as? [String: Any] {
+                return meta["username"] as? String
+            }
+            return loadFromKeychain(key: "username")
+        }()
+
         // Persist tokens in Keychain (AUTH-02)
         saveToKeychain(key: "accessToken", value: accessToken)
         saveToKeychain(key: "refreshToken", value: refreshToken)
         if let userId { saveToKeychain(key: "userId", value: userId) }
         if let userEmail { saveToKeychain(key: "userEmail", value: userEmail) }
+        if let username { saveToKeychain(key: "username", value: username) }
 
         currentToken = accessToken
         currentUserID = userId
         currentEmail = userEmail
+        currentUsername = username
         isAuthenticated = true
-        print("[Auth] Authenticated — user: \(userId ?? "unknown")")
+        print("[Auth] Authenticated")
+        fetchProfileAndEntitlements()
         completion(true)
     }
 
+    private func invokeAccountRecovery(
+        action: String,
+        fields: [String: String],
+        completion: @escaping (Bool, Data?, String?) -> Void
+    ) {
+        let url = URL(string: "\(supabaseURL)/functions/v1/account-recovery")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        var payload: [String: String] = ["action": action]
+        fields.forEach { payload[$0.key] = $0.value }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        urlSession.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                guard let data, let http = response as? HTTPURLResponse else {
+                    completion(false, nil, error?.localizedDescription ?? "Network error")
+                    return
+                }
+                if (200...299).contains(http.statusCode) {
+                    completion(true, data, nil)
+                    return
+                }
+                completion(false, data, self.parseError(data: data) ?? "Request failed")
+            }
+        }.resume()
+    }
+
+    private func fetchProfileAndEntitlements() {
+        guard let token = currentToken, let userId = currentUserID else { return }
+
+        var profileRequest = URLRequest(url: URL(string: "\(supabaseURL)/rest/v1/profiles?id=eq.\(userId)&select=username,email,display_name")!)
+        profileRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        profileRequest.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        urlSession.dataTask(with: profileRequest) { [weak self] data, _, _ in
+            DispatchQueue.main.async {
+                guard let self,
+                      let data,
+                      let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                      let row = rows.first else { return }
+                if let username = row["username"] as? String, !username.isEmpty {
+                    self.currentUsername = username
+                    self.saveToKeychain(key: "username", value: username)
+                }
+                if let email = row["email"] as? String, !email.isEmpty {
+                    self.currentEmail = email
+                    self.saveToKeychain(key: "userEmail", value: email)
+                }
+            }
+        }.resume()
+
+        var subRequest = URLRequest(url: URL(string: "\(supabaseURL)/rest/v1/subscriptions?user_id=eq.\(userId)&select=support_rounds_granted,support_rounds_clawed_back")!)
+        subRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        subRequest.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        urlSession.dataTask(with: subRequest) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if let data,
+                   let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                   let row = rows.first {
+                    let granted = Self.jsonInt(row["support_rounds_granted"])
+                    let clawed = Self.jsonInt(row["support_rounds_clawed_back"])
+                    RoundTracker.shared.syncCompensationRounds(
+                        userId: userId,
+                        granted: granted,
+                        clawedBack: clawed
+                    )
+                } else {
+                    let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                    print("[Auth] \(ISO8601DateFormatter().string(from: Date())) subscription read \(code)")
+                }
+                self?.syncRoundLedger()
+            }
+        }.resume()
+    }
+
+    /// Write the phone's playable balance to Supabase so support sees the same number.
+    func syncRoundLedger() {
+        guard let token = currentToken, let userId = currentUserID else { return }
+        let tracker = RoundTracker.shared
+        let store = StoreService.shared
+        let payload: [String: Any] = [
+            "purchased_rounds": tracker.purchasedRoundsRemaining,
+            "free_round_used": !tracker.hasFreeRound,
+            "subscription_rounds_used": tracker.subscriptionRoundsUsed,
+            "status": store.isSubscribed ? "active" : "none",
+            "product_id": store.activeSubscription ?? NSNull(),
+        ]
+        let url = URL(string: "\(supabaseURL)/rest/v1/subscriptions?user_id=eq.\(userId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        urlSession.dataTask(with: request) { data, response, _ in
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if !(200...299).contains(code) {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                print("[Auth] \(ISO8601DateFormatter().string(from: Date())) round ledger sync failed \(code)")
+            }
+        }.resume()
+    }
+
     private func clearLocalAuth() {
-        for key in ["accessToken", "refreshToken", "userId", "userEmail", "appleIDToken", "appleUserID"] {
+        for key in ["accessToken", "refreshToken", "userId", "userEmail", "appleIDToken", "appleUserID", "username"] {
             deleteFromKeychain(key: key)
         }
         currentToken = nil
         currentUserID = nil
         currentEmail = nil
+        currentUsername = nil
         isAuthenticated = false
     }
 
@@ -506,6 +828,7 @@ class AuthService: NSObject, ObservableObject {
                     self?.currentUserID = appleUserID
                     self?.currentToken = self?.loadFromKeychain(key: "appleIDToken")
                     self?.currentEmail = self?.loadFromKeychain(key: "userEmail")
+                    self?.currentUsername = self?.loadFromKeychain(key: "username")
                     self?.isAuthenticated = true
                     completion(true)
                 } else {
@@ -513,6 +836,12 @@ class AuthService: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    private static func jsonInt(_ value: Any?) -> Int {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        return 0
     }
 
     private func decodeJWTPayload(_ token: String) -> [String: Any]? {
@@ -534,7 +863,10 @@ class AuthService: NSObject, ObservableObject {
 
     private func parseError(data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return json["error_description"] as? String ?? json["msg"] as? String ?? json["message"] as? String
+        return json["error_description"] as? String
+            ?? json["msg"] as? String
+            ?? json["message"] as? String
+            ?? json["error"] as? String
     }
 
     // MARK: - Keychain
@@ -545,7 +877,10 @@ class AuthService: NSObject, ObservableObject {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: key,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            // Tokens stay on this device and are unreadable while locked,
+            // so an unlocked-backup restore cannot carry a session over.
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         SecItemDelete(query as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)

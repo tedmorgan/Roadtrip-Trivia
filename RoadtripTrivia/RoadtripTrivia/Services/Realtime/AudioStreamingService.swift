@@ -14,6 +14,18 @@ class AudioStreamingService: ObservableObject {
     @Published private(set) var isStreaming = false
     @Published private(set) var isPlayingResponse = false
 
+    /// True while a host turn is still coming out of the speaker. Gemini's
+    /// turn-complete event arrives before the queued buffers finish, so
+    /// callers that would interrupt the model must wait on this, not on
+    /// the phase flip to listening.
+    var hasPendingPlayback: Bool {
+        if isPlayingResponse { return true }
+        bufferLock.lock()
+        let pending = scheduledBufferCount
+        bufferLock.unlock()
+        return pending > 0
+    }
+
     // #region agent log
     private static let _logPath: String = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -25,13 +37,14 @@ class AudioStreamingService: ObservableObject {
     private var _audioSentCount: Int = 0
     private var _audioSuppressedCount: Int = 0
     private func _logMic(_ msg: String, _ data: [String: Any] = [:]) {
+        guard DiagnosticLog.isEnabled else { return }
         let payload: [String: Any] = [
             "sessionId": "30dda1",
             "location": "AudioStreamingService.swift",
             "message": msg,
             "timestamp": Int(Date().timeIntervalSince1970 * 1000),
             "hypothesisId": "MIC_GATE",
-            "data": data
+            "data": DiagnosticLog.redactingSensitiveKeys(data)
         ]
         if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
            let jsonStr = String(data: jsonData, encoding: .utf8) {
@@ -88,20 +101,13 @@ class AudioStreamingService: ObservableObject {
     /// Timer to unmute mic after playback finishes.
     private var unmuteMicTimer: DispatchWorkItem?
 
-    /// Timer to mute mic after user stops speaking (saves tokens in the gap
-    /// between user speech ending and AI starting to respond).
+    /// Timer used to delay mute after user speech. Kept so pending work can
+    /// be cancelled; we no longer mute on VAD-stop while waiting for answers.
     private var postSpeechMuteTimer: DispatchWorkItem?
 
     /// Grace period after AI finishes speaking before unmuting mic.
     /// 150ms is sufficient for echo tail-off in a car (speaker/mic separation).
     private let postPlaybackMuteDelay: TimeInterval = 0.15
-
-    /// Delay after user stops speaking before muting mic.
-    /// Gameplay quality matters more than the small token savings here: a
-    /// 300ms window can split a natural answer like "B ... the Amazon" into
-    /// two utterances and suppress the tail, which looks like the host ignored
-    /// the answer. Keep the mic open long enough for normal hesitation.
-    private let postSpeechMuteDelay: TimeInterval = 1.0
 
     /// Set by the coordinator when it submits a tool result and the AI needs
     /// processing time. Cleared when the AI's next audio response arrives.
@@ -115,8 +121,10 @@ class AudioStreamingService: ObservableObject {
     /// Timestamp of the most recent mic chunk whose energy crossed the
     /// voice threshold. Used to corroborate server-side barge-in events:
     /// if WE never heard voice, the server VAD tripped on noise/echo and
-    /// playback must not be interrupted (BargeInPolicy).
-    private var lastLocalVoiceAt: Date?
+    /// playback must not be interrupted (BargeInPolicy). Also used by the
+    /// no-answer guard so a player who spoke into an open mic is counted
+    /// even when Gemini never emits an input transcript.
+    private(set) var lastLocalVoiceAt: Date?
     /// The actual time the microphone became live after speaker playback
     /// drained. The coordinator uses this instead of Gemini's earlier
     /// generation-complete event when validating a player's answer.
@@ -224,7 +232,9 @@ class AudioStreamingService: ObservableObject {
         postSpeechMuteTimer = nil
         muteFailsafeTimer?.cancel()
         muteFailsafeTimer = nil
+        bufferLock.lock()
         preRoll.clear()
+        bufferLock.unlock()
         lastLocalVoiceAt = nil
         lastMicOpenedAt = nil
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -240,6 +250,15 @@ class AudioStreamingService: ObservableObject {
         audioConverter = nil
         _micOnTime = 0; _micOffTime = 0; _audioSentCount = 0; _audioSuppressedCount = 0
         print("[Audio] Streaming stopped")
+    }
+
+    /// Cut in-flight host audio immediately (round reseed / lightning TIME IS UP).
+    func interruptPlayback() {
+        playerNode.stop()
+        bufferLock.lock()
+        scheduledBufferCount = 0
+        bufferLock.unlock()
+        isPlayingResponse = false
     }
 
     /// Wait until streamed response audio has finished playing before asking
@@ -279,7 +298,9 @@ class AudioStreamingService: ObservableObject {
         unmuteMicTimer = nil
         // Anything captured before this mute belongs to the previous open
         // window — never replay it after the host finishes.
+        bufferLock.lock()
         preRoll.clear()
+        bufferLock.unlock()
         armMuteFailsafe()
     }
 
@@ -340,7 +361,9 @@ class AudioStreamingService: ObservableObject {
         // Only audio arriving during the short drain delay below is eligible
         // for pre-roll; replaying the host's own last words made Gemini score
         // an invented player answer.
+        bufferLock.lock()
         preRoll.clear()
+        bufferLock.unlock()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             guard !self.farewellMuted else { return }
@@ -440,13 +463,17 @@ class AudioStreamingService: ObservableObject {
             // Gated: keep a short rolling tail instead of dropping it.
             // If the player answers a beat before the unmute, the first
             // words are flushed from here once the mic opens.
+            bufferLock.lock()
             preRoll.append(base64Audio: base64, hasVoice: hasVoice)
+            bufferLock.unlock()
             return
         }
 
         // Mic open: flush any pre-roll tail captured just before unmute,
         // then the live chunk, preserving order.
+        bufferLock.lock()
         let buffered = preRoll.drainForFlush()
+        bufferLock.unlock()
         if !buffered.isEmpty {
             // The tail contained voice — count it as local voice evidence.
             lastLocalVoiceAt = Date()
@@ -583,13 +610,12 @@ class AudioStreamingService: ObservableObject {
             bufferLock.unlock()
 
         case .inputAudioBufferSpeechStopped:
-            guard !farewellMuted else { break }
+            // Do not mute after a VAD stop. Gemini often commits cabin noise
+            // or a 0.8s pause as end-of-speech; muting here deafens the mic
+            // while the player is still answering. Host playback already
+            // mutes via `AI speaking`.
             postSpeechMuteTimer?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                self?.muteMic(reason: "post-speech gap")
-            }
-            postSpeechMuteTimer = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + postSpeechMuteDelay, execute: work)
+            postSpeechMuteTimer = nil
 
         // #region agent log
         case .usageMetadata(let prompt, let response, let total, let raw):
@@ -635,7 +661,7 @@ class AudioStreamingService: ObservableObject {
         playerNode.scheduleBuffer(pcmBuffer) { [weak self] in
             guard let self else { return }
             self.bufferLock.lock()
-            self.scheduledBufferCount -= 1
+            self.scheduledBufferCount = max(0, self.scheduledBufferCount - 1)
             let remaining = self.scheduledBufferCount
             self.bufferLock.unlock()
 

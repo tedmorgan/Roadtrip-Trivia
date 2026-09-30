@@ -61,6 +61,23 @@ final class EndGamePolicyTests: XCTestCase {
 
     // MARK: - Lightning timer race window
 
+    /// 2026-09-29: lightning wrap-up already asked "want to keep playing?".
+    /// The player said no and the model called end_game 9s later. The race
+    /// window rejected it and the host asked again. That call is the answer.
+    func test_honorsEndGameAfterLightningContinuePrompt() {
+        let action = EndGamePolicy.decide(
+            pendingNoRoundsEnd: false,
+            sessionAlive: true,
+            canPlayRound: true,
+            lightningExpiredWithRoundsRemainingSecondsAgo: 9.0,
+            isLightningRound: false,
+            roundAnswered: 4,
+            endGameConfirmationPending: true,
+            playerRequestedEndGame: false
+        )
+        XCTAssertEqual(action, .honor)
+    }
+
     func test_rejectsLightningRaceWithinWindow() {
         let action = EndGamePolicy.decide(
             pendingNoRoundsEnd: false,

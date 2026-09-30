@@ -1,16 +1,23 @@
 import Foundation
+#if canImport(RoadtripTriviaLogic)
+import RoadtripTriviaLogic
+#endif
 
 /// Logs Realtime `response.done` usage (token breakdown when present) for
 /// cost review. Grok Voice bills primarily by audio minute ($0.08/min for
 /// Think Fast 2.0); token fields remain useful for diagnosing recovery spend.
 ///
-/// Log file location: Documents/api_usage.log
-/// Access via: Files.app → On My iPhone → Roadtrip Trivia, or Xcode → Devices → Download Container
+/// Writes to Documents/api_usage.log, and only while `DiagnosticLog` is
+/// enabled — off by default in Release. The app no longer exposes its
+/// Documents folder to the Files app, so retrieve the file with
+/// `devicectl device copy from --domain-type appDataContainer` or
+/// Xcode → Devices → Download Container.
 class APIUsageLogger {
 
     static let shared = APIUsageLogger()
 
-    private let fileHandle: FileHandle?
+    private var fileHandle: FileHandle?
+    private var didOpenFile = false
     private let logFileURL: URL
     private let queue = DispatchQueue(label: "com.nagrom.roadtrip.apilog", qos: .utility)
     private let dateFormatter: DateFormatter = {
@@ -38,11 +45,17 @@ class APIUsageLogger {
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         logFileURL = docs.appendingPathComponent("api_usage.log")
+    }
 
+    /// Open the file on first write rather than in `init`, so merely
+    /// touching `shared` does not leave an empty log on a device where
+    /// diagnostics are off. Always called on `queue`.
+    private func openFileIfNeeded() {
+        guard !didOpenFile else { return }
+        didOpenFile = true
         if !FileManager.default.fileExists(atPath: logFileURL.path) {
             FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
         }
-
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         fileHandle?.seekToEndOfFile()
     }
@@ -174,19 +187,21 @@ class APIUsageLogger {
     // MARK: - Private
 
     private func writeEntry(_ message: String) {
+        guard DiagnosticLog.isEnabled else { return }
         let timestamp = dateFormatter.string(from: Date())
         let context = contextSuffix()
         let line = "[\(timestamp)] \(message)\(context)\n"
         guard let data = line.data(using: .utf8) else { return }
         queue.async { [weak self] in
+            self?.openFileIfNeeded()
             self?.fileHandle?.write(data)
         }
     }
 
     private func contextSuffix() -> String {
         var parts: [String] = []
-        if let user = contextUserId { parts.append("user=\(user)") }
-        if let team = contextTeamName { parts.append("team=\"\(team)\"") }
+        if let user = DiagnosticLog.pseudonymize(contextUserId) { parts.append("user=\(user)") }
+        if contextTeamName != nil { parts.append("team=\(DiagnosticLog.redact(contextTeamName))") }
         if let round = contextRound { parts.append("round=\(round)") }
         if let q = contextQuestion { parts.append("question=\(q)") }
         if let cat = contextCategory { parts.append("category=\"\(cat)\"") }

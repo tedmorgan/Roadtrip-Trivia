@@ -8,12 +8,13 @@ struct SystemPromptBuilder {
 
     static func buildSessionConfig(
         locationLabel: String?,
-        voice: String = "Puck",
+        voice: String = "Orus",
         resumeContext: ResumeContext? = nil,
         preconfiguredContext: PreConfiguredContext? = nil,
         gameStatePacket: GameStatePacket? = nil,
         isFirstGame: Bool = true,
-        roundsRemaining: Int? = nil
+        roundsRemaining: Int? = nil,
+        isRoundReseed: Bool = false
     ) -> SessionConfig {
         let difficulty: Difficulty? = preconfiguredContext?.difficulty
             ?? gameStatePacket.flatMap { Difficulty(rawValue: $0.difficulty) }
@@ -26,7 +27,8 @@ struct SystemPromptBuilder {
             gameStatePacket: gameStatePacket,
             isFirstGame: isFirstGame,
             chosenDifficulty: difficulty,
-            roundsRemaining: roundsRemaining
+            roundsRemaining: roundsRemaining,
+            isRoundReseed: isRoundReseed
         )
 
         return SessionConfig(
@@ -51,8 +53,9 @@ struct SystemPromptBuilder {
         0. NEW GAME: finish setup (team, ages, difficulty) then call set_game_config \
            immediately — do not speak after the difficulty answer. Trivia starts only \
            after that tool returns.
-        1. Call get_next_question. If result has `announce`, say it VERBATIM, then read \
-           questionText VERBATIM. For MC say ALL options as \
+        1. Call get_next_question. If result has `announce`, say it VERBATIM, then say \
+           the `read` field VERBATIM exactly once. Do not add or repeat a question number, \
+           and do not also read questionText. For MC say ALL options as \
            "Is it A: …, B: …, C: …, or D: …?" then "What do you think?".
         2. Wait for a real answer. Silence/noise is NOT a skip and NOT an answer — \
            skip only if they literally say "skip". A letter or option text is enough for MC. \
@@ -60,12 +63,13 @@ struct SystemPromptBuilder {
            then keep waiting.
         3. Call report_score({playerAnswer, isCorrect}) immediately — no spoken reaction first \
            (app plays chime/gong). App grades against its answer key.
-        4. Say report_score.say VERBATIM, then one short game-show color phrase \
+        4. If nextAction says the app will speak the verdict, say nothing and wait. \
+           Otherwise say report_score.say VERBATIM, then one short game-show color phrase \
            (hype a hit, playful groan a miss). Then go to step 1. \
            No filler ("ready?", "shall we continue?", "let's hit the road").
         5. End of round: follow nextAction — brief summary, ask "Want to keep going?". \
            Call end_game only if they say stop/end game. When roundsRemaining is 0, \
-           acknowledge and wait — the app drives the farewell.
+           say nothing — the app speaks the verdict and the farewell.
 
         SCORE: Speak totalPoints from tool results only. To fix a mis-grade, call \
         report_score again with the corrected outcome.
@@ -109,7 +113,8 @@ struct SystemPromptBuilder {
         preconfiguredContext: PreConfiguredContext? = nil,
         gameStatePacket: GameStatePacket? = nil,
         isFirstGame: Bool = true,
-        roundsRemaining: Int? = nil
+        roundsRemaining: Int? = nil,
+        isRoundReseed: Bool = false
     ) -> String {
         let location = locationLabel ?? "somewhere in the United States"
         var memory = """
@@ -129,13 +134,34 @@ struct SystemPromptBuilder {
         }
 
         if let packet = gameStatePacket {
-            memory += """
+            let past = RoundContextReseedPolicy.pastRoundsSummary(
+                rounds: packet.pastRounds.map {
+                    (roundNumber: $0.roundNumber, category: $0.category,
+                     correct: $0.correct, answered: $0.answered)
+                }
+            )
+            if isRoundReseed {
+                memory += """
 
-            GAME STATE (authoritative):
-            \(packet.toJSON())
-            Resume at Round \(packet.roundNumber), Question \(packet.questionIndex + 1)/5. \
-            Skip setup. Greet warmly, brief score recap, continue with get_next_question.
-            """
+                SAME GAME — NEXT ROUND:
+                Do not greet. Do not recap rules. Do not ask team name, ages, or difficulty.
+                Team, score, and past rounds are in GAME STATE. Call get_next_question immediately.
+                Keep conversation context for THIS round only once questions begin.
+                PAST ROUNDS: \(past)
+
+                GAME STATE (authoritative):
+                \(packet.toJSON())
+                """
+            } else {
+                memory += """
+
+                GAME STATE (authoritative):
+                \(packet.toJSON())
+                Resume at Round \(packet.roundNumber), Question \(packet.questionIndex + 1)/5. \
+                Skip setup. Greet warmly, brief score recap, continue with get_next_question.
+                PAST ROUNDS: \(past)
+                """
+            }
         } else if let resume = resumeContext {
             let answeredInRound = max(0, min(5, resume.questionIndex))
             let advancesToNextRound = answeredInRound >= 5
@@ -184,7 +210,8 @@ struct SystemPromptBuilder {
         gameStatePacket: GameStatePacket? = nil,
         isFirstGame: Bool = true,
         chosenDifficulty: Difficulty? = nil,
-        roundsRemaining: Int? = nil
+        roundsRemaining: Int? = nil,
+        isRoundReseed: Bool = false
     ) -> String {
         let policy = buildPolicyBlock(chosenDifficulty: chosenDifficulty)
         let memory = buildMemoryBlock(
@@ -193,7 +220,8 @@ struct SystemPromptBuilder {
             preconfiguredContext: preconfiguredContext,
             gameStatePacket: gameStatePacket,
             isFirstGame: isFirstGame,
-            roundsRemaining: roundsRemaining
+            roundsRemaining: roundsRemaining,
+            isRoundReseed: isRoundReseed
         )
         return policy + memory
     }

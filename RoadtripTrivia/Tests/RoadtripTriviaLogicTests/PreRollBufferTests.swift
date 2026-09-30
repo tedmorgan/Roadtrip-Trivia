@@ -57,4 +57,13 @@ final class PreRollBufferTests: XCTestCase {
         buf.clear()
         XCTAssertEqual(buf.drainForFlush(), [])
     }
+
+    func test_cappingNeverTrapsWhenOverflowing() {
+        var buf = PreRollBuffer(maxChunks: 2)
+        for i in 0..<50 {
+            buf.append(base64Audio: "x\(i)", hasVoice: true)
+        }
+        XCTAssertEqual(buf.chunks.count, 2)
+        XCTAssertEqual(buf.drainForFlush(), ["x48", "x49"])
+    }
 }

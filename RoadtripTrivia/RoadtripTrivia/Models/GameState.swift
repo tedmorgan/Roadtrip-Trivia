@@ -160,6 +160,7 @@ struct GameStatePacket: Codable {
     let lightningSecondsRemaining: Int?
     let currentRoundQuestions: [String]
     let usedCategories: [String]
+    let pastRounds: [PastRoundMemory]
 
     func toJSON() -> String {
         let encoder = JSONEncoder()
@@ -170,4 +171,13 @@ struct GameStatePacket: Codable {
         }
         return str
     }
+}
+
+/// Compact per-round scoreboard injected into Gemini at round-boundary reseeds
+/// so the host knows the game so far without keeping old transcripts.
+struct PastRoundMemory: Codable, Equatable {
+    let roundNumber: Int
+    let category: String
+    let correct: Int
+    let answered: Int
 }

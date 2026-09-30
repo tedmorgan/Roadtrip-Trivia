@@ -177,7 +177,7 @@ final class GeminiLiveSessionManager: NSObject, ObservableObject, LiveSessionMan
         guard let url = URL(string: "\(supabaseURL)/gemini-live-token") else {
             throw RealtimeError.invalidURL
         }
-        guard let accessToken = AuthService.shared.currentToken, !accessToken.isEmpty else {
+        guard let accessToken = await AuthService.shared.accessTokenForRequests(), !accessToken.isEmpty else {
             throw RealtimeError.tokenFetchFailed("Authentication required")
         }
 

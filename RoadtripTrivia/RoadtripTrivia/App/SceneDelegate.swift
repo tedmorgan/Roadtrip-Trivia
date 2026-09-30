@@ -22,11 +22,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.rootViewController = navigationController
         window?.makeKeyAndVisible()
         print("[SceneDelegate] Window is now visible")
+        if let url = connectionOptions.urlContexts.first?.url {
+            AuthService.shared.handleGoogleCallback(url: url)
+        }
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         guard let url = URLContexts.first?.url else { return }
-        print("[SceneDelegate] Received URL: \(url)")
+        // The path only — an auth callback URL carries tokens in its
+        // query and fragment.
+        print("[SceneDelegate] Received URL: \(url.scheme ?? "?")://\(url.host ?? "?")\(url.path)")
         AuthService.shared.handleGoogleCallback(url: url)
     }
 }

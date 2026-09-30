@@ -4,9 +4,10 @@ import Combine
 // #region agent log helper
 private let _debugLogPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first! + "/debug-f3b222.log"
 private func _dbg(_ hyp: String, _ loc: String, _ msg: String, _ data: [String: Any]) {
-    let entry: [String: Any] = ["sessionId":"f3b222","hypothesisId":hyp,"location":loc,"message":msg,"data":data,"timestamp":Date().timeIntervalSince1970*1000]
+    guard DiagnosticLog.isEnabled else { return }
+    let entry: [String: Any] = ["sessionId":"f3b222","hypothesisId":hyp,"location":loc,"message":msg,"data":DiagnosticLog.redactingSensitiveKeys(data),"timestamp":Date().timeIntervalSince1970*1000]
     guard let d = try? JSONSerialization.data(withJSONObject: entry), let line = String(data: d, encoding: .utf8) else { return }
-    print("[DBG-f3b222] \(hyp) | \(msg) | \(data)")
+    print("[DBG-f3b222] \(hyp) | \(msg)")
     if !FileManager.default.fileExists(atPath: _debugLogPath) { FileManager.default.createFile(atPath: _debugLogPath, contents: nil) }
     guard let h = FileHandle(forWritingAtPath: _debugLogPath) else { return }
     h.seekToEndOfFile(); h.write((line+"\n").data(using: .utf8)!); h.closeFile()
@@ -60,6 +61,10 @@ class RealtimeGameCoordinator: ObservableObject {
     private var pendingLightningFlushInstructions: String?
     /// After the 2:00 timer hits zero, block `startLightningTimer` from the B1 path so wrap-up `report_score(isLightning:true)` cannot restart a new lightning round.
     private var suppressLightningToolCallRestart = false
+    /// Timer hit zero this lightning round. report_score must not treat Q7 as a standard round-complete.
+    private var lightningTimedOut = false
+    /// Question count in the active round. Standard rounds stay at 5.
+    private var currentRoundQuestionCount = 5
     /// Timestamp of the last lightning timer expiry with rounds remaining. Used to reject
     /// a stray `end_game` that the AI emits in the race window before it processes our
     /// "move to next round" instruction.
@@ -106,6 +111,7 @@ class RealtimeGameCoordinator: ObservableObject {
         RoundTracker.shared.consumeOneRound()
         currentRoundConsumed = true
         consumedRoundNumbers.insert(currentRoundNumber)
+        recordPastRoundMemory()
         // #region agent log
         _dbg("RCONS","RealtimeGameCoordinator.swift:\(#line)","round consumed",["roundNumber":currentRoundNumber,"reason":reason,"remaining":RoundTracker.shared.totalRoundsAvailable])
         // #endregion
@@ -146,6 +152,25 @@ class RealtimeGameCoordinator: ObservableObject {
 
     // Category history — tracks used categories to prevent repeats
     private var usedCategories: [String] = []
+    /// Finished-round scoreboard injected at session reseeds (not live transcripts).
+    private var pastRoundMemories: [PastRoundMemory] = []
+    /// Last round whose Live session was already reseeded. Prevents a loop.
+    private var lastReseededRound: Int?
+    /// After we decide Q1 of a later round needs a fresh Live session.
+    private var pendingRoundReseed: (roundNumber: Int, category: String, isLightning: Bool)?
+    private var isRoundReseedInProgress = false
+    private var roundReseedRetries = 0
+    /// Set once playback has drained and the reseed commit has started, so a
+    /// second audio-done event cannot cancel the session twice.
+    private var roundReseedCommitStarted = false
+    private var deferredReseedWork: DispatchWorkItem?
+    private var roundBoundaryFillerWork: DispatchWorkItem?
+    private var roundBoundaryQuietAt: Date?
+    private var roundBoundaryWaitStarted: Date?
+    /// Bumped whenever a real tool call arrives so a watchdog nudge that has
+    /// not been sent yet is dropped instead of cancelling that call.
+    private var recoveryNudgeToken: UUID?
+    private var toolCancelRetryWork: DispatchWorkItem?
 
     // Batch pre-generation: questions are generated via REST in advance
     private var batchTask: Task<QuestionBatch, Error>?
@@ -230,9 +255,12 @@ class RealtimeGameCoordinator: ObservableObject {
     /// pre-roll flush at mic-open otherwise reads as a phantom answer
     /// (2026-07-21 R2Q5: scored ~1.5s after mic opened, player never spoke).
     private var answerWindowOpenedAt: Date?
+    /// First mic-open after the current question's answer window. Frozen so
+    /// later unmutes (no-answer denials, host "take your time") do not restart
+    /// the pre-roll grace and ignore the player's actual answers.
+    private var frozenAnswerWindowAt: Date?
     /// Times the no-player-answer guard has rejected a report_score for the
-    /// currently served question. Capped so a broken transcription stream
-    /// degrades to the old behavior instead of deadlocking the game.
+    /// currently served question.
     private var answerDenialsForCurrentQuestion = 0
     /// Correct answer for the active question. Kept app-side so Gemini does not
     /// see the answer while reading the question and accidentally reveal it.
@@ -576,6 +604,7 @@ class RealtimeGameCoordinator: ObservableObject {
         currentRoundQuestions = []
         lastPlayerSpeechAt = nil
         answerWindowOpenedAt = nil
+        frozenAnswerWindowAt = nil
         answerDenialsForCurrentQuestion = 0
 
         // Lightning round state — invalidate any stale timer/work directly
@@ -594,7 +623,9 @@ class RealtimeGameCoordinator: ObservableObject {
         lightningAnnouncedButNotStarted = false
         pendingLightningFlushInstructions = nil
         suppressLightningToolCallRestart = false
+        lightningTimedOut = false
         lightningExpiredWithRoundsRemainingAt = nil
+        currentRoundQuestionCount = 5
         stateManager.clearLightning()
         gameViewModel.lightningSecondsRemaining = nil
 
@@ -602,6 +633,21 @@ class RealtimeGameCoordinator: ObservableObject {
         // games on disk for long-term dedup; loadQuestionHistory restores it).
         sessionQuestions = []
         usedCategories = []
+        pastRoundMemories = []
+        lastReseededRound = nil
+        pendingRoundReseed = nil
+        isRoundReseedInProgress = false
+        roundReseedRetries = 0
+        roundReseedCommitStarted = false
+        deferredReseedWork?.cancel()
+        deferredReseedWork = nil
+        roundBoundaryFillerWork?.cancel()
+        roundBoundaryFillerWork = nil
+        roundBoundaryQuietAt = nil
+        roundBoundaryWaitStarted = nil
+        recoveryNudgeToken = nil
+        toolCancelRetryWork?.cancel()
+        toolCancelRetryWork = nil
 
         // Batch / question-serve state
         QuestionBatchService.shared.reset()
@@ -621,6 +667,7 @@ class RealtimeGameCoordinator: ObservableObject {
         lastServedQuestionResult = nil
         lastQuestionServedAt = nil
         answerWindowOpenedAt = nil
+        frozenAnswerWindowAt = nil
         activeQuestionCorrectAnswer = nil
         activeQuestionOptions = nil
         lastGradedByQuestion.removeAll()
@@ -922,7 +969,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 let phase = self.gameViewModel.currentPhase
                 guard phase != .idle && phase != .gameOver && phase != .connecting else { return }
 
-                if !connected && !self.pausedByConnectionLoss && !self.isReconnecting && phase != .paused {
+                if !connected && !self.pausedByConnectionLoss && !self.isReconnecting && !self.isRoundReseedInProgress && phase != .paused {
                     print("[RealtimeGame] WebSocket disconnected during gameplay — pausing for reconnect")
                     // #region agent log
                     _dbg("E1","RealtimeGameCoordinator.swift:ws_drop","WebSocket isConnected→false during gameplay",["phase":"\(phase)","round":self.currentRoundNumber,"question":self.currentQuestionIndex,"closeInfo":self.sessionManager.lastCloseInfo ?? "none","reconnectAttempts":self.reconnectAttempts])
@@ -977,6 +1024,7 @@ class RealtimeGameCoordinator: ObservableObject {
 
         case .responseAudioDelta:
             lastAudioDeltaAt = Date()
+            recoveryNudgeToken = nil
             cancelSilenceWatchdog()
             // AI audio means a pending reconnect-resume succeeded.
             cancelReconnectResumeWatchdog()
@@ -1020,9 +1068,13 @@ class RealtimeGameCoordinator: ObservableObject {
             //     from here so we don't serve the next round before the player
             //     can decline (2026-07-21 R2→R3).
             // Updated on every done so a re-read/clarification resets it.
-            let awaitingContinueDecision = roundAnswered >= 5 && !isLightningRound && gameViewModel.currentSession != nil
+            let awaitingContinueDecision = standardRoundLimitReached() && gameViewModel.currentSession != nil
             if lastQuestionServedAt != nil || awaitingContinueDecision {
                 answerWindowOpenedAt = Date()
+            }
+            if pendingRoundReseed != nil {
+                commitRoundReseedWhenQuiet()
+                return
             }
             // The AI just finished a turn. If we're waiting on the
             // no-rounds-left farewell to wrap up:
@@ -1067,7 +1119,10 @@ class RealtimeGameCoordinator: ObservableObject {
             if pendingPostScoreContinuation
                 && !pendingNoRoundsEnd
                 && gameViewModel.currentSession != nil {
-                startPostScoreSilenceWatchdog(reason: "post-score-continuation")
+                let reason = standardRoundLimitReached()
+                    ? "post-round-complete"
+                    : "post-score-continuation"
+                startPostScoreSilenceWatchdog(reason: reason)
             }
             // Count intro host turns so we can force `set_game_config` if
             // Grok finishes the three setup questions and never calls the tool.
@@ -1081,7 +1136,10 @@ class RealtimeGameCoordinator: ObservableObject {
         case .responseAudioTranscriptDone(let text):
             // Detect lightning round *start* from transcript (not wrap-up: "total up your lightning round score").
             if !isLightningRound && !lightningAnnouncedButNotStarted
-                && Self.transcriptSuggestsStartingLightningRound(text) {
+                && LightningAnnouncementPolicy.isNewLightningStart(
+                    transcript: text,
+                    lightningTimedOut: lightningTimedOut
+                ) {
                 lightningAnnouncedButNotStarted = true
                 suppressLightningToolCallRestart = false
                 gameViewModel.lightningSecondsRemaining = 120
@@ -1149,6 +1207,12 @@ class RealtimeGameCoordinator: ObservableObject {
                 // a get_next_question, rewind the batch so the same question is re-served.
                 let cancelledCallId = message.replacingOccurrences(of: "Tool call cancelled: ", with: "")
                 if cancelledCallId == lastGetNextQuestionCallId {
+                    if audioService.hasPendingPlayback {
+                        // The question is already coming out of the speaker.
+                        // Rewinding and re-serving here is what cut R3Q4 off.
+                        _dbg("CANCEL","RealtimeGameCoordinator.swift:\(#line)","ignoring tool_call_cancelled — question audio still playing",["cancelledCallId":cancelledCallId,"round":currentRoundNumber,"question":currentQuestionIndex])
+                        return
+                    }
                     QuestionBatchService.shared.rewindLastQuestion()
                     if !sessionQuestions.isEmpty { sessionQuestions.removeLast() }
                     lastGetNextQuestionCallId = nil
@@ -1178,16 +1242,7 @@ class RealtimeGameCoordinator: ObservableObject {
                     _dbg("CANCEL","RealtimeGameCoordinator.swift:\(#line)","tool_call_cancelled (non-served) — recovering",["cancelledCallId":cancelledCallId,"round":currentRoundNumber,"question":currentQuestionIndex])
                     // #endregion
                     print("[RealtimeGame] tool_call_cancelled (non-served) — nudging to continue without re-scoring")
-                    if permitRecovery(.softNudge, context: "tool-cancel-recover") {
-                        Task {
-                            try? await Task.sleep(nanoseconds: 400_000_000)
-                            try? await sessionManager.send(.responseCreate(
-                                instructions: "Continue the game: call get_next_question to move to the NEXT question. The previous question is already scored — do NOT call report_score again."
-                            ))
-                        }
-                    } else {
-                        escalateStuckToReconnect(context: "tool-cancel-recover")
-                    }
+                    recoverFromCancelledTool()
                 }
             }
 
@@ -1212,7 +1267,7 @@ class RealtimeGameCoordinator: ObservableObject {
         // confirmation window where the host just asked "keep going?".
         let isBetweenRoundsStopWindow =
             endGameConfirmationPending ||
-            (!isLightningRound && roundAnswered >= 5)
+            standardRoundLimitReached()
 
         // An EXPLICIT quit ("stop playing", "quit", "end the game", "no more",
         // "done playing") is unambiguous and must be honored at ANY time —
@@ -1282,7 +1337,8 @@ class RealtimeGameCoordinator: ObservableObject {
     // MARK: - Function Call Dispatch
 
     private func handleFunctionCall(callId: String, name: String, arguments: String) {
-        print("[RealtimeGame] Function call: \(name)(\(arguments.prefix(100)))")
+        // Arguments carry the player's spoken answer; name and size only.
+        print("[RealtimeGame] Function call: \(name) (\(arguments.count) bytes)")
 
         guard let data = arguments.data(using: .utf8) else {
             submitResult(callId: callId, name: name, result: ["error": "Invalid arguments"])
@@ -1508,7 +1564,7 @@ class RealtimeGameCoordinator: ObservableObject {
         // Only enforce when the report_score is for the CURRENT round (not a new round transition).
         let reportedLightning = args.isLightning ?? false
         let isSameRound = args.roundNumber == nil || args.roundNumber == currentRoundNumber
-        if !reportedLightning && !isLightningRound && roundAnswered >= 5 && isSameRound {
+        if !reportedLightning && !isLightningRound && standardRoundLimitReached() && isSameRound {
             print("[RealtimeGame] Round question limit reached (\(roundAnswered)/5) — rejecting extra report_score")
             // #region agent log
             _dbg("QLIMIT","RealtimeGameCoordinator.swift:\(#line)","report_score REJECTED: round already has 5 questions",["roundAnswered":roundAnswered,"questionIndex":args.questionIndex,"roundNumber":String(describing:args.roundNumber),"currentRoundNumber":currentRoundNumber])
@@ -1611,14 +1667,20 @@ class RealtimeGameCoordinator: ObservableObject {
         // NoAnswerGuardPolicy for the 2026-06-12 "every pause became a
         // gong + answer reveal" failure mode, and the 2026-07-21 R2Q5 case
         // where the model chimed ~1.5s after the mic opened — before the
-        // player could answer. Measure speech from the answer window (mic
-        // live), not the muted question-read.
-        let effectiveAnswerWindowOpenedAt: Date? = [
-            answerWindowOpenedAt,
-            audioService.lastMicOpenedAt,
-        ].compactMap { $0 }.max()
+        // player could answer. Measure speech from the first mic-open after
+        // the question finished, not from later denial-unmute cycles.
+        if frozenAnswerWindowAt == nil,
+           let micOpened = audioService.lastMicOpenedAt,
+           let window = answerWindowOpenedAt,
+           micOpened >= window {
+            frozenAnswerWindowAt = micOpened
+        }
+        let effectiveAnswerWindowOpenedAt = frozenAnswerWindowAt ?? answerWindowOpenedAt
+        let latestSpeech = [lastPlayerSpeechAt, audioService.lastLocalVoiceAt]
+            .compactMap { $0 }
+            .max()
         let playerSpokeSinceServe = NoAnswerGuardPolicy.playerProvidedAnswer(
-            lastPlayerSpeechAt: lastPlayerSpeechAt,
+            lastPlayerSpeechAt: latestSpeech,
             answerWindowOpenedAt: effectiveAnswerWindowOpenedAt,
             questionServedAt: lastQuestionServedAt
         )
@@ -1637,7 +1699,9 @@ class RealtimeGameCoordinator: ObservableObject {
             _dbg("NO_ANSWER_GUARD","RealtimeGameCoordinator.swift:\(#line)","report_score DENIED — \(denyReason)",["playerAnswer":args.playerAnswer ?? "nil","denials":answerDenialsForCurrentQuestion,"round":currentRoundNumber,"question":args.questionIndex,"spokeSinceServe":playerSpokeSinceServe,"answerWindowElapsedSec":answerWindowElapsed])
             // #endregion
             print("[RealtimeGame] report_score denied (\(denyReason)) — telling AI to wait for a real answer")
-            audioService.suspendMicForProcessing()
+            // Keep the mic open. Muting here was deafening the player for the
+            // entire "take your time" loop (Build 42 R1Q4: four spoken answers
+            // never reached Gemini).
             submitResultImmediate(callId: callId, name: name, result: [
                 "error": "NO_PLAYER_ANSWER",
                 "instruction": "The app heard NO answer from the player (\(denyReason)). Do NOT score this question, do NOT reveal the answer or any options' correctness, and NEVER treat silence as a skip. Briefly invite them — e.g. 'Take your time — what do you think?' — then WAIT for the player to actually speak."
@@ -1658,6 +1722,7 @@ class RealtimeGameCoordinator: ObservableObject {
             lastServedQuestionResult = nil
             lastQuestionServedAt = nil
             answerWindowOpenedAt = nil
+            frozenAnswerWindowAt = nil
             lastGetNextQuestionCallId = nil
         } else if lastGetNextQuestionCallId != nil {
             // A served question is still unanswered while the player took a
@@ -1698,7 +1763,7 @@ class RealtimeGameCoordinator: ObservableObject {
             } else {
                 totalAnswered += 1
                 roundAnswered += 1
-                if args.questionIndex >= 5 && !isLightningRound {
+                if standardRoundLimitReached(questionIndex: args.questionIndex) {
                     consumeRoundCreditOnce(reason: "round completed (Q\(args.questionIndex))")
                 }
                 if actualIsCorrect {
@@ -1826,7 +1891,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 correct: totalCorrect,
                 answered: totalAnswered,
                 questionInRound: args.questionIndex,
-                totalInRound: 5
+                totalInRound: currentRoundQuestionCount
             )
         }
         gameViewModel.displayRoundCorrect = roundCorrect
@@ -1910,7 +1975,10 @@ class RealtimeGameCoordinator: ObservableObject {
         }
 
         let ppc = currentDifficulty.pointsPerCorrect
-        let isRoundComplete = args.questionIndex >= 5 && !isLightningRound
+        let isRoundComplete = standardRoundLimitReached(questionIndex: args.questionIndex) && !lightningTimedOut
+        if isRoundComplete {
+            recordPastRoundMemory()
+        }
 
         // Use the pure `ReportScoreActionPolicy` to compute the post-score
         // regime AND the explicit `nextAction` instruction text. This
@@ -1929,7 +1997,9 @@ class RealtimeGameCoordinator: ObservableObject {
             questionIndex: args.questionIndex,
             isLightningRound: isLightningRound,
             canPlayRound: RoundTracker.shared.canPlayRound,
-            roundsLeftAfterScoring: roundsLeftAfterScoring
+            roundsLeftAfterScoring: roundsLeftAfterScoring,
+            lightningTimedOut: lightningTimedOut,
+            questionsInRound: currentRoundQuestionCount
         )
         let noRoundsLeft = (outcome == .roundCompleteNoRoundsLeft)
         let nextAction = ReportScoreActionPolicy.nextActionText(for: outcome)
@@ -1959,6 +2029,8 @@ class RealtimeGameCoordinator: ObservableObject {
         // correct answers, and point totals are app-owned facts. This closes
         // the "host said the wrong verdict / never revealed the answer /
         // spoke a different score than the screen" defect family.
+        var verdictLine: String?
+        let appSpeaksFarewell = roundLimitReached || noRoundsLeft
         if !actualHint && !hintDenied && !challengeDenied {
             let answerForSpeech = spokenCorrectAnswer
             let sayLine: String
@@ -1979,7 +2051,13 @@ class RealtimeGameCoordinator: ObservableObject {
                     pointsPerCorrect: ppc,
                     totalPoints: totalCorrect * ppc)
             }
-            result["say"] = sayLine
+            verdictLine = sayLine
+            // On the last available round the farewell chain speaks this
+            // line. Leaving it in the tool result makes the host start it
+            // and then get cut off by the goodbye.
+            if !appSpeaksFarewell {
+                result["say"] = sayLine
+            }
         }
         if hintDenied {
             result["hintDenied"] = true
@@ -1996,7 +2074,7 @@ class RealtimeGameCoordinator: ObservableObject {
 
         if roundLimitReached {
             result["roundLimitReached"] = true
-            result["message"] = "The player has used all available rounds. The app will drive the farewell — just acknowledge this result and wait for instructions. Do NOT call end_game. Do NOT ask if they want to play again."
+            result["message"] = "The player has used all available rounds. Do NOT speak. The app will speak the verdict and the farewell. Do NOT call end_game. Do NOT ask if they want to play again."
             // #region agent log
             _dbg("PAYWALL_POST","RealtimeGameCoordinator.swift:\(#line)","posting roundLimitReachedNotification (roundLimitReached path)",["totalCorrect":totalCorrect,"round":currentRoundNumber,"remaining":RoundTracker.shared.totalRoundsAvailable])
             // #endregion
@@ -2009,7 +2087,8 @@ class RealtimeGameCoordinator: ObservableObject {
             let chain = makeNoRoundsFarewellChain(
                 finalScore: totalCorrect * currentDifficulty.pointsPerCorrect,
                 roundsPlayed: currentRoundNumber,
-                context: "round_limit_reached"
+                context: "round_limit_reached",
+                verdict: verdictLine
             )
             armNoRoundsEnd(withChain: chain)
             return
@@ -2030,8 +2109,8 @@ class RealtimeGameCoordinator: ObservableObject {
         // (debug-f3b222 2.log: Q1→Q2 gap 7.9s, Q4 stalled 12.6s before
         // the generic watchdog even fired, then died entirely). Any AI
         // audio delta or non-`report_score` tool call cancels these timers.
-        if !isRoundComplete && !isHintOrChallengeReport && !hintDenied && !challengeDenied && !noRoundsLeft {
-            startPostScoreSilenceWatchdog(reason: "post-score-armed")
+        if !isHintOrChallengeReport && !hintDenied && !challengeDenied && !noRoundsLeft {
+            startPostScoreSilenceWatchdog(reason: isRoundComplete ? "post-round-complete" : "post-score-armed")
             // Mark that we are awaiting the AI's get_next_question call.
             // `responseAudioDone` will re-arm the watchdog (with a sharper
             // nudge) once the AI's reaction-speech audio ends, since that
@@ -2068,13 +2147,15 @@ class RealtimeGameCoordinator: ObservableObject {
             let chain = makeNoRoundsFarewellChain(
                 finalScore: totalCorrect * ppc,
                 roundsPlayed: currentRoundNumber,
-                context: "report_score_no_rounds_left"
+                context: "report_score_no_rounds_left",
+                verdict: verdictLine
             )
             armNoRoundsEnd(withChain: chain)
         }
     }
 
     private func handleGetNextQuestion(callId: String, name: String) {
+        recoveryNudgeToken = nil
         Task { @MainActor in
             // #region agent log
             _dbg("BATCH","RealtimeGameCoordinator.swift:\(#line)","get_next_question called",["hasBatch":QuestionBatchService.shared.currentBatch != nil,"hasTask":batchTask != nil])
@@ -2100,7 +2181,7 @@ class RealtimeGameCoordinator: ObservableObject {
             // opened, before the decline transcript landed). Give the player a
             // real answer window here, then re-check for a decline before
             // committing to the next round.
-            if roundAnswered >= 5, !isLightningRound, gameViewModel.currentSession != nil {
+            if standardRoundLimitReached(), gameViewModel.currentSession != nil {
                 let minContinueWindow: TimeInterval = 3.0
                 let elapsed = answerWindowOpenedAt.map { Date().timeIntervalSince($0) }
                 let waitSeconds: TimeInterval = {
@@ -2289,6 +2370,65 @@ class RealtimeGameCoordinator: ObservableObject {
                 }
             }
 
+            if pendingRoundReseed != nil || isRoundReseedInProgress {
+                audioService.suspendMicForProcessing()
+                submitResultImmediate(callId: callId, name: name, result: [
+                    "status": "ROUND_CONTEXT_RESET",
+                    "instruction": "Wait silently. Do not speak, greet, recap, or read a question. The next round is loading."
+                ])
+                return
+            }
+
+            if lightningTimedOut,
+               let peeked = QuestionBatchService.shared.peekNextQuestion(),
+               peeked.round.isLightning {
+                QuestionBatchService.shared.skipRemainingQuestionsInCurrentRound()
+            }
+
+            if LiveProvider.selected == .gemini,
+               let peeked = QuestionBatchService.shared.peekNextQuestion(),
+               RoundContextReseedPolicy.shouldReseed(
+                nextRoundNumber: peeked.round.roundNumber,
+                nextQuestionIndex: peeked.questionIndex,
+                lastReseededRound: lastReseededRound
+               ) {
+                let announce = RoundIntroComposer.compose(
+                    roundNumber: peeked.round.roundNumber,
+                    category: peeked.round.category,
+                    isLightning: peeked.round.isLightning,
+                    locationLabel: locationService.currentLocationLabel
+                )
+                pendingRoundReseed = (
+                    roundNumber: peeked.round.roundNumber,
+                    category: peeked.round.category,
+                    isLightning: peeked.round.isLightning
+                )
+                _dbg("ROUND_RESEED","RealtimeGameCoordinator.swift:\(#line)","deferring new-round Q1 until live context is reset",["nextRound":peeked.round.roundNumber,"category":peeked.round.category])
+                print("[RealtimeGame] Resetting live context before Round \(peeked.round.roundNumber)")
+                lastToolEventAt = Date()
+                cancelQuestionReadWatchdog()
+                audioService.suspendMicForProcessing()
+                let silentResult: [String: Any] = [
+                    "status": "ROUND_CONTEXT_RESET",
+                    "announce": announce,
+                    "instruction": RoundContextReseedPolicy.bridgeInstruction(announce: announce)
+                ]
+                Task { @MainActor in
+                    do {
+                        try await self.sessionManager.queueFunctionResult(
+                            callId: callId, result: silentResult, name: name
+                        )
+                        try await self.sessionManager.flushPendingResults()
+                    } catch {
+                        print("[RealtimeGame] Reseed tool result failed: \(error)")
+                    }
+                    // Let the verdict finish playing. Cancelling now cuts the
+                    // answer off and plays the system voice over a short gap.
+                    self.commitRoundReseedWhenQuiet()
+                }
+                return
+            }
+
             guard let next = QuestionBatchService.shared.nextQuestion() else {
                 // Exhausted — trigger a new batch for the next 5 rounds
                 let nextStart = currentRoundNumber + 1
@@ -2359,19 +2499,32 @@ class RealtimeGameCoordinator: ObservableObject {
 
             let location = locationService.currentLocationLabel ?? "somewhere in the United States"
             let isNewRound = next.questionIndex == 1
+            let alreadyAnnounced = RoundContextReseedPolicy.shouldOmitAnnounce(
+                roundNumber: next.round.roundNumber,
+                questionIndex: next.questionIndex,
+                lastReseededRound: lastReseededRound
+            )
+            let readLine = QuestionReadComposer.readLine(
+                questionIndex: next.questionIndex,
+                questionText: next.question.questionText
+            )
+            let hasAnnounce = isNewRound && !alreadyAnnounced
+            var instruction = QuestionReadComposer.toolInstruction(hasAnnounce: hasAnnounce)
+            if hasAnnounce {
+                instruction = "\(IntroFlowPolicy.doNotAnnounceLoading) \(instruction)"
+            }
             var result: [String: Any] = [
                 "roundNumber": next.round.roundNumber,
                 "questionIndex": next.questionIndex,
                 "category": next.round.category,
-                "questionText": next.question.questionText,
+                "questionText": QuestionReadComposer.body(from: next.question.questionText),
+                "read": readLine,
                 "isLightning": next.round.isLightning,
                 "isNewRound": isNewRound,
                 "location": location,
-                "instruction": isNewRound
-                    ? "\(IntroFlowPolicy.doNotAnnounceLoading) Say the announce field VERBATIM, then 'Question \(next.questionIndex)', then read questionText VERBATIM. Do NOT paraphrase or reveal the answer. After the player answers, call report_score."
-                    : "Say 'Question \(next.questionIndex)' then read questionText VERBATIM. Do NOT paraphrase or reveal the answer. After the player answers, call report_score."
+                "instruction": instruction
             ]
-            if isNewRound {
+            if isNewRound && !alreadyAnnounced {
                 // App-composed round announcement — round number, category,
                 // and (critically) the lightning format are app-owned facts.
                 result["announce"] = RoundIntroComposer.compose(
@@ -2386,12 +2539,18 @@ class RealtimeGameCoordinator: ObservableObject {
             }
 
             // #region agent log
-            _dbg("BATCH","RealtimeGameCoordinator.swift:\(#line)","serving question",["round":next.round.roundNumber,"qIdx":next.questionIndex,"total":next.round.questions.count,"category":next.round.category,"isLightning":next.round.isLightning,"isNew":next.questionIndex == 1,"hasOptions":next.question.options != nil])
+            _dbg("BATCH","RealtimeGameCoordinator.swift:\(#line)","serving question",["round":next.round.roundNumber,"qIdx":next.questionIndex,"total":next.round.questions.count,"category":next.round.category,"isLightning":next.round.isLightning,"isNew":next.questionIndex == 1,"hasOptions":next.question.options != nil,"answerLetter":String(next.question.correctAnswer.prefix(1))])
             // #endregion
 
             lastGetNextQuestionCallId = callId
             lastServedQuestionResult = result
             lastQuestionServedAt = Date()
+            currentRoundQuestionCount = max(next.round.questions.count, 1)
+            if next.round.isLightning {
+                ensureLightningTimerStarted()
+            } else {
+                lightningTimedOut = false
+            }
             updateTranscriptionKeyterms(
                 questionText: next.question.questionText,
                 options: next.question.options,
@@ -2401,6 +2560,8 @@ class RealtimeGameCoordinator: ObservableObject {
             // Answer window is CLOSED until the host finishes reading this
             // freshly-served question (reopened on the next responseAudioDone).
             answerWindowOpenedAt = nil
+            frozenAnswerWindowAt = nil
+            lastPlayerSpeechAt = nil
             answerDenialsForCurrentQuestion = 0
             // Only reset the per-question recovery budget on genuine forward
             // progress. A re-serve triggered by a tool_call_cancelled rewind is
@@ -2742,7 +2903,7 @@ class RealtimeGameCoordinator: ObservableObject {
                     location: location,
                     difficulty: difficulty,
                     ageBands: ageBands,
-                    questionHistory: questionHistory,
+                    questionHistory: QuestionDedupPolicy.historyWithTopicKeys(questionHistory),
                     usedCategories: usedCategories,
                     startingRound: startingRound
                 )
@@ -2834,11 +2995,28 @@ class RealtimeGameCoordinator: ObservableObject {
 
     // MARK: - Lightning Round Timer (LTNG-08, CP-SCORE-06)
 
+    private func ensureLightningTimerStarted() {
+        guard !suppressLightningToolCallRestart else { return }
+        guard !isLightningRound || lightningTimer == nil else { return }
+        startLightningTimer()
+        _dbg("B1","RealtimeGameCoordinator.swift:\(#line)","startLightningTimer on lightning question serve",["round":currentRoundNumber])
+    }
+
+    private func standardRoundLimitReached(answered: Int? = nil, questionIndex: Int? = nil) -> Bool {
+        guard !isLightningRound else { return false }
+        let limit = max(currentRoundQuestionCount, 1)
+        if let questionIndex {
+            return questionIndex >= limit
+        }
+        return (answered ?? roundAnswered) >= limit
+    }
+
     private func startLightningTimer() {
+        if isLightningRound, lightningTimer != nil { return }
         suppressLightningToolCallRestart = false
+        lightningTimedOut = false
         isLightningRound = true
         lightningSecondsRemaining = 120
-        // Bug 21: Reset dedicated lightning counters
         lightningCorrect = 0
         lightningAnswered = 0
         roundCorrect = 0
@@ -2860,44 +3038,56 @@ class RealtimeGameCoordinator: ObservableObject {
             self.gameViewModel.lightningSecondsRemaining = self.lightningSecondsRemaining
 
             if self.lightningSecondsRemaining <= 0 {
-                self.lightningTimer?.invalidate()
-                self.lightningTimer = nil
-
-                // End lightning state immediately so in-flight report_score cannot count as lightning (logs: Q at secs 0).
-                let correct = self.lightningCorrect
-                let answered = self.lightningAnswered
-                self.suppressLightningToolCallRestart = true
-                self.stopLightningTimer()
-                if RoundTracker.shared.canPlayRound {
-                    self.pendingLightningFlushInstructions = "TIME IS UP! Lightning over. Score: \(correct)/\(answered). Do NOT ask another question or call report_score. Announce score, move to next standard round."
-                    // Arm the end_game guard window: the AI may try to call end_game
-                    // before receiving this instruction; reject such calls.
-                    self.lightningExpiredWithRoundsRemainingAt = Date()
-                } else {
-                    // Rounds exhausted and lightning timer expired. Have the
-                    // AI announce the lightning result only; then the app
-                    // drives the full farewell chain so the purchase CTA
-                    // reliably gets spoken.
-                    self.pendingLightningFlushInstructions = "TIME IS UP! Lightning over. Score: \(correct)/\(answered). Announce the lightning result in ONE short sentence, then stop. Do NOT ask another question. Do NOT call any tools."
-                    postRoundLimitReached(context: "lightning_timeout_no_rounds")
-                    let chain = self.makeNoRoundsFarewellChain(
-                        finalScore: self.totalCorrect,
-                        roundsPlayed: self.currentRoundNumber,
-                        context: "lightning_timeout_no_rounds_start"
-                    )
-                    self.armNoRoundsEnd(withChain: chain)
-                }
-                // #region agent log
-                _dbg("D1","RealtimeGameCoordinator.swift:timer0","lightning timer zero — stopLightningTimer + merge TIME IS UP into next flush",["correct":correct,"answered":answered])
-                // #endregion
-
-                // Cancel in-flight speech; TIME IS UP is delivered via ONE response.create merged in flushPendingResults (avoids conversation_already_has_active_response).
-                Task {
-                    try? await self.sessionManager.send(.responseCancel)
-                }
+                self.handleLightningTimerExpired()
             }
         }
         print("[RealtimeGame] Lightning round started — 120s timer")
+    }
+
+    private func handleLightningTimerExpired() {
+        lightningTimer?.invalidate()
+        lightningTimer = nil
+        let correct = lightningCorrect
+        let answered = lightningAnswered
+        suppressLightningToolCallRestart = true
+        lightningTimedOut = true
+        QuestionBatchService.shared.skipRemainingQuestionsInCurrentRound()
+        recordPastRoundMemory()
+        stopLightningTimer()
+        cancelQuestionReadWatchdog()
+        audioService.interruptPlayback()
+
+        switch LightningAnnouncementPolicy.timeoutSpeech(
+            correct: correct,
+            answered: answered,
+            roundsStillAvailable: RoundTracker.shared.canPlayRound
+        ) {
+        case .geminiContinue(let instructions):
+            // The wrap-up line already asks "want to keep playing?".
+            // A following "no" / end_game is the answer, not a new question.
+            endGameConfirmationPending = true
+            pendingLightningFlushInstructions = instructions
+            lightningExpiredWithRoundsRemainingAt = Date()
+        case .farewellOnly:
+            pendingLightningFlushInstructions = nil
+            postRoundLimitReached(context: "lightning_timeout_no_rounds")
+            let chain = makeNoRoundsFarewellChain(
+                finalScore: totalCorrect,
+                roundsPlayed: currentRoundNumber,
+                context: "lightning_timeout_no_rounds_start"
+            )
+            armNoRoundsEnd(withChain: chain)
+        }
+        _dbg("D1","RealtimeGameCoordinator.swift:timer0","lightning timer zero — one host wrap-up",["correct":correct,"answered":answered])
+
+        let wrap = pendingLightningFlushInstructions
+        pendingLightningFlushInstructions = nil
+        Task {
+            try? await self.sessionManager.send(.responseCancel)
+            if let wrap {
+                try? await self.sessionManager.flushPendingResults(instructions: wrap)
+            }
+        }
     }
 
     private func stopLightningTimer() {
@@ -3218,6 +3408,7 @@ class RealtimeGameCoordinator: ObservableObject {
 
     /// Schedule a reconnection attempt with exponential backoff and max retry enforcement.
     private func scheduleReconnect() {
+        cancelRoundBoundaryFiller()
         reconnectWorkItem?.cancel()
 
         guard reconnectAttempts < maxReconnectAttempts else {
@@ -3323,8 +3514,179 @@ class RealtimeGameCoordinator: ObservableObject {
             isLightningRound: isLightningRound,
             lightningSecondsRemaining: isLightningRound ? lightningSecondsRemaining : nil,
             currentRoundQuestions: currentRoundQuestions,
-            usedCategories: usedCategories
+            usedCategories: usedCategories,
+            pastRounds: pastRoundMemories
         )
+    }
+
+    private func buildNextRoundStatePacket(
+        roundNumber: Int,
+        category: String,
+        isLightning: Bool
+    ) -> GameStatePacket {
+        let session = gameViewModel.currentSession
+        return GameStatePacket(
+            roundNumber: roundNumber,
+            questionIndex: 0,
+            category: category,
+            difficulty: currentDifficulty.rawValue,
+            playerCount: session?.playerCount ?? 1,
+            teamName: session?.teamName ?? "Team",
+            ageBands: session?.ageBands.map { $0.rawValue } ?? ["adults"],
+            totalCorrect: totalCorrect,
+            totalAnswered: totalAnswered,
+            roundCorrect: 0,
+            roundAnswered: 0,
+            totalPoints: totalCorrect * currentDifficulty.pointsPerCorrect,
+            roundPoints: 0,
+            hintsUsed: 0,
+            challengesUsed: 0,
+            isLightningRound: isLightning,
+            lightningSecondsRemaining: isLightning ? 120 : nil,
+            currentRoundQuestions: [],
+            usedCategories: usedCategories,
+            pastRounds: pastRoundMemories
+        )
+    }
+
+    private func recordPastRoundMemory() {
+        guard currentRoundNumber > 0 else { return }
+        if pastRoundMemories.last?.roundNumber == currentRoundNumber { return }
+        pastRoundMemories.append(
+            PastRoundMemory(
+                roundNumber: currentRoundNumber,
+                category: currentCategory,
+                correct: roundCorrect,
+                answered: max(roundAnswered, 1)
+            )
+        )
+    }
+
+    /// Wait until the speaker has finished the verdict, then tear down the
+    /// old live session. The system-voice filler is armed only for the gap
+    /// after that, and cancelled if the new host speaks first.
+    private func commitRoundReseedWhenQuiet() {
+        guard pendingRoundReseed != nil else { return }
+        guard !isRoundReseedInProgress, !roundReseedCommitStarted else { return }
+        if audioService.hasPendingPlayback {
+            if roundBoundaryWaitStarted == nil {
+                roundBoundaryWaitStarted = Date()
+            }
+            let waited = Date().timeIntervalSince(roundBoundaryWaitStarted ?? Date())
+            if waited < 12 {
+                deferredReseedWork?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    self?.commitRoundReseedWhenQuiet()
+                }
+                deferredReseedWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+                return
+            }
+        }
+        roundBoundaryWaitStarted = nil
+        roundReseedCommitStarted = true
+        deferredReseedWork?.cancel()
+        deferredReseedWork = nil
+        roundBoundaryQuietAt = Date()
+        armRoundBoundaryFiller()
+        Task { @MainActor in
+            try? await self.sessionManager.send(.responseCancel)
+            self.audioService.interruptPlayback()
+            self.reseedLiveSessionForNewRound()
+        }
+    }
+
+    private func armRoundBoundaryFiller() {
+        roundBoundaryFillerWork?.cancel()
+        let quietAt = roundBoundaryQuietAt ?? Date()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let elapsed = Date().timeIntervalSince(quietAt)
+            let hostSpoke = self.lastAudioDeltaAt.map { $0 > quietAt } ?? false
+            guard RoundContextReseedPolicy.shouldSpeakRoundBoundaryFiller(
+                secondsSincePlaybackDrained: elapsed,
+                hostHasSpokenSinceReseed: hostSpoke
+            ) else { return }
+            self.connectionMonitor.speakOffline(RoundContextReseedPolicy.roundBoundaryFiller)
+        }
+        roundBoundaryFillerWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + RoundContextReseedPolicy.roundBoundaryFillerDelaySeconds,
+            execute: work
+        )
+    }
+
+    private func cancelRoundBoundaryFiller() {
+        roundBoundaryFillerWork?.cancel()
+        roundBoundaryFillerWork = nil
+    }
+
+    /// Drop Gemini Live history at a round boundary and reseed from app memory.
+    /// Does NOT use the resumption token — that would restore the expensive context.
+    private func reseedLiveSessionForNewRound() {
+        guard let pending = pendingRoundReseed else {
+            roundReseedCommitStarted = false
+            return
+        }
+        guard !isRoundReseedInProgress else { return }
+        isRoundReseedInProgress = true
+        roundReseedCommitStarted = false
+        pendingRoundReseed = nil
+        cancelSilenceWatchdog()
+        cancelQuestionReadWatchdog()
+        cancelPostScoreWatchdogs()
+        cancelReconnectResumeWatchdog()
+        pendingPostScoreContinuation = false
+
+        let packet = buildNextRoundStatePacket(
+            roundNumber: pending.roundNumber,
+            category: pending.category,
+            isLightning: pending.isLightning
+        )
+        let config = SystemPromptBuilder.buildSessionConfig(
+            locationLabel: locationService.currentLocationLabel,
+            gameStatePacket: packet,
+            isFirstGame: false,
+            roundsRemaining: RoundTracker.shared.totalRoundsAvailable,
+            isRoundReseed: true
+        )
+        let instructions = RoundContextReseedPolicy.postReseedInstructions(
+            roundNumber: pending.roundNumber,
+            category: pending.category
+        )
+
+        Task { @MainActor in
+            do {
+                audioService.stopStreaming()
+                sessionManager.disconnect(preserveResumptionToken: false)
+                audioManager.activateForSpeech()
+                audioService.configure(sessionManager: sessionManager)
+                sessionManager.autoReconnectDisabled = true
+                try await sessionManager.connect(sessionConfig: config)
+                try audioService.startStreaming()
+                gameViewModel.transition(to: .playing)
+                lastReseededRound = pending.roundNumber
+                roundReseedRetries = 0
+                isRoundReseedInProgress = false
+                try await sessionManager.send(.responseCreate(instructions: instructions))
+                startSilenceWatchdog(reason: "round-reseed")
+                _dbg("ROUND_RESEED","RealtimeGameCoordinator.swift:\(#line)","live context reseeded",["round":pending.roundNumber,"category":pending.category,"pastRounds":pastRoundMemories.count])
+                print("[RealtimeGame] Live context reseeded for Round \(pending.roundNumber)")
+            } catch {
+                print("[RealtimeGame] Round reseed failed: \(error)")
+                _dbg("ROUND_RESEED","RealtimeGameCoordinator.swift:\(#line)","reseed failed",["error":"\(error)","retries":roundReseedRetries])
+                isRoundReseedInProgress = false
+                if roundReseedRetries < 1 {
+                    roundReseedRetries += 1
+                    pendingRoundReseed = pending
+                    reseedLiveSessionForNewRound()
+                } else {
+                    roundReseedRetries = 0
+                    pausedByConnectionLoss = true
+                    scheduleReconnect()
+                }
+            }
+        }
     }
 
     // MARK: - Silence Watchdog
@@ -3377,6 +3739,9 @@ class RealtimeGameCoordinator: ObservableObject {
         case "post-score-continuation":
             nudgeText = "Call get_next_question NOW. Do NOT re-ask or re-read the previous question — it has already been scored."
             timeout = postScoreContinuationSilenceSeconds
+        case "post-round-complete":
+            nudgeText = "The round just ended and you have been silent. Say one short sentence asking if they want to keep playing, then wait. If they already said yes, call get_next_question now. Do NOT read a new question yourself."
+            timeout = postScoreInitialSilenceSeconds
         default:
             nudgeText = "React briefly (one sentence) to the player's last answer, then call get_next_question immediately."
             timeout = postScoreInitialSilenceSeconds
@@ -3394,7 +3759,9 @@ class RealtimeGameCoordinator: ObservableObject {
                 default: return .other
                 }
             }()
-            let policyReason: PostScoreReason = (reason == "post-score-continuation") ? .continuation : .armed
+            let policyReason: PostScoreReason =
+                (reason == "post-score-continuation" || reason == "post-round-complete")
+                ? .continuation : .armed
 
             let recentToolGap = self.lastToolEventAt
                 .map { Date().timeIntervalSince($0) } ?? .infinity
@@ -3405,7 +3772,8 @@ class RealtimeGameCoordinator: ObservableObject {
                 phase: policyPhase,
                 secondsSinceLastAudioDelta: recentAudioGap,
                 reason: policyReason,
-                secondsSinceLastToolEvent: recentToolGap
+                secondsSinceLastToolEvent: recentToolGap,
+                playbackStillDraining: self.audioService.hasPendingPlayback
             )
 
             switch action {
@@ -3429,17 +3797,28 @@ class RealtimeGameCoordinator: ObservableObject {
                 // #endregion
                 print("[RealtimeGame] Post-score watchdog (\(reason)) fired after \(timeout)s — soft nudge\(isHard ? " + escalation armed" : "")")
 
-                guard self.permitRecovery(.softNudge,
-                                          context: "post-score-\(reason)") else { return }
-                self.postScoreNudgeFiredWithoutAudio = true
-
+                let token = UUID()
+                self.recoveryNudgeToken = token
                 Task { [weak self] in
                     guard let self else { return }
+                    // A tool call in this window means the model already moved
+                    // on. Sending now would cancel that call and cut the audio.
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    guard self.recoveryNudgeToken == token else { return }
+                    guard !self.audioService.hasPendingPlayback else {
+                        self.startPostScoreSilenceWatchdog(reason: reason)
+                        return
+                    }
+                    guard self.permitRecovery(.softNudge,
+                                              context: "post-score-\(reason)") else { return }
+                    if recentAudioGap >= 15 {
+                        self.connectionMonitor.speakOffline("One moment, still with you.")
+                    }
+                    self.postScoreNudgeFiredWithoutAudio = true
                     try? await self.sessionManager.send(.responseCreate(instructions: nudgeText))
-                }
-
-                if isHard {
-                    self.armPostScoreEscalationWatchdog(reason: reason)
+                    if isHard {
+                        self.armPostScoreEscalationWatchdog(reason: reason)
+                    }
                 }
             }
         }
@@ -3569,7 +3948,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 Task { [weak self] in
                     guard let self else { return }
                     try? await self.sessionManager.send(.responseCreate(
-                        instructions: "Go ahead and read the question from the get_next_question tool result now: say \"Question X\" using its questionIndex, then read the questionText word-for-word followed by all four options. No transition, no preamble — straight into the question."
+                        instructions: "Go ahead and read the question from the get_next_question tool result now: say the read field verbatim, exactly once, then all four options. Do not repeat the question number. No transition, no preamble — straight into the question."
                     ))
                 }
 
@@ -3603,7 +3982,7 @@ class RealtimeGameCoordinator: ObservableObject {
                 Task { [weak self] in
                     guard let self else { return }
                     try? await self.sessionManager.send(.responseCreate(
-                        instructions: "Go ahead and read the question from the get_next_question tool result now: say \"Question X\" using its questionIndex, then read the questionText word-for-word followed by all four options. No transition, no preamble — straight into the question."
+                        instructions: "Go ahead and read the question from the get_next_question tool result now: say the read field verbatim, exactly once, then all four options. Do not repeat the question number. No transition, no preamble — straight into the question."
                     ))
                 }
             }
@@ -3622,6 +4001,41 @@ class RealtimeGameCoordinator: ObservableObject {
     /// question survive). Called when in-place recovery has spent its
     /// per-question cancel budget — nudging further would just spin (see the
     /// R3 tool_call_cancelled loop, 2026-06-24).
+    /// A cancelled tool call at the round boundary used to reconnect the
+    /// moment the governor said "too soon". Spacing means a nudge just
+    /// happened; wait it out. Reconnect only when the per-question budget
+    /// is actually spent.
+    private func recoverFromCancelledTool(attempt: Int = 0) {
+        let now = Date().timeIntervalSince1970
+        let verdict = TurnRecoveryGovernor.decide(kind: .softNudge, now: now, state: recoveryState)
+        switch verdict {
+        case .allow:
+            guard permitRecovery(.softNudge, context: "tool-cancel-recover") else { return }
+            let token = UUID()
+            recoveryNudgeToken = token
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard self.recoveryNudgeToken == token else { return }
+                guard !self.audioService.hasPendingPlayback else { return }
+                try? await self.sessionManager.send(.responseCreate(
+                    instructions: "Continue the game: call get_next_question to move to the NEXT question. The previous question is already scored — do NOT call report_score again."
+                ))
+            }
+        case .denySpacing(let gap):
+            guard attempt == 0 else { return }
+            let wait = max(0.25, TurnRecoveryGovernor.defaultMinSpacingSeconds - gap)
+            _dbg("CANCEL","RealtimeGameCoordinator.swift:\(#line)","tool cancel spaced — retrying without reconnect",["gap":gap,"wait":wait,"round":currentRoundNumber,"question":currentQuestionIndex])
+            toolCancelRetryWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.recoverFromCancelledTool(attempt: 1)
+            }
+            toolCancelRetryWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
+        case .denyNudgeBudget, .denyCancelBudget:
+            escalateStuckToReconnect(context: "tool-cancel-recover")
+        }
+    }
+
     private func escalateStuckToReconnect(context: String) {
         guard !pausedByConnectionLoss && !isReconnecting else { return }
         // #region agent log
@@ -3740,12 +4154,14 @@ class RealtimeGameCoordinator: ObservableObject {
     private func makeNoRoundsFarewellChain(
         finalScore: Int,
         roundsPlayed: Int,
-        context: String
+        context: String,
+        verdict: String? = nil
     ) -> [FarewellChunk] {
         FarewellScript.makeNoRoundsChain(
             finalScore: finalScore,
             roundsPlayed: roundsPlayed,
-            context: context
+            context: context,
+            verdict: verdict
         )
     }
 
@@ -4192,32 +4608,7 @@ class RealtimeGameCoordinator: ObservableObject {
             )
 
             if self.lightningSecondsRemaining <= 0 {
-                self.lightningTimer?.invalidate()
-                self.lightningTimer = nil
-                let correct = self.lightningCorrect
-                let answered = self.lightningAnswered
-                self.suppressLightningToolCallRestart = true
-                self.stopLightningTimer()
-                if RoundTracker.shared.canPlayRound {
-                    self.pendingLightningFlushInstructions = "TIME IS UP! Lightning over. Score: \(correct)/\(answered). Do NOT ask another question or call report_score. Announce score, move to next standard round."
-                    self.lightningExpiredWithRoundsRemainingAt = Date()
-                } else {
-                    // Rounds are exhausted AND lightning timer expired.
-                    // Use a short pending instruction (AI will announce the
-                    // lightning result), then drive the full farewell via
-                    // the chain so the purchase CTA is guaranteed to be spoken.
-                    self.pendingLightningFlushInstructions = "TIME IS UP! Lightning over. Score: \(correct)/\(answered). Announce the lightning result in ONE short sentence, then stop. Do NOT ask another question. Do NOT call any tools."
-                    self.postRoundLimitReached(context: "lightning_timeout_no_rounds_resume")
-                    let chain = self.makeNoRoundsFarewellChain(
-                        finalScore: self.totalCorrect,
-                        roundsPlayed: self.currentRoundNumber,
-                        context: "lightning_timeout_no_rounds"
-                    )
-                    self.armNoRoundsEnd(withChain: chain)
-                }
-                Task {
-                    try? await self.sessionManager.send(.responseCancel)
-                }
+                self.handleLightningTimerExpired()
             }
         }
         print("[RealtimeGame] Lightning timer resumed with \(lightningSecondsRemaining)s remaining")

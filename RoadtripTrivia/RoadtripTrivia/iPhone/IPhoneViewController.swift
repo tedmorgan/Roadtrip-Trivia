@@ -101,6 +101,11 @@ class IPhoneViewController: UIViewController {
             .store(in: &cancellables)
 
         // Listen for paywall requests (from CarPlay or RealtimeGameCoordinator)
+        NotificationCenter.default.publisher(for: AuthService.passwordRecoveryNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.promptForNewPassword() }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: RoundTracker.showPaywallNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.presentOrDeferPaywall() }
@@ -758,6 +763,34 @@ class IPhoneViewController: UIViewController {
         }
         present(nav, animated: true)
     }
+
+    private func promptForNewPassword() {
+        let alert = UIAlertController(
+            title: "Choose a new password",
+            message: "This replaces the password for \(authService.currentEmail ?? "this account").",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "New password"
+            field.isSecureTextEntry = true
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            let password = alert?.textFields?.first?.text ?? ""
+            self?.authService.updatePassword(password) { success, error in
+                let done = UIAlertController(
+                    title: success ? "Password updated" : "Could not update password",
+                    message: success ? "You can sign in with the new password." : (error ?? "Try the reset link again."),
+                    preferredStyle: .alert
+                )
+                done.addAction(UIAlertAction(title: "OK", style: .default))
+                self?.present(done, animated: true)
+            }
+        })
+        present(alert, animated: true)
+    }
 }
 
 // MARK: - Leaderboards
@@ -1121,6 +1154,9 @@ class AccountSettingsSheet: UIViewController {
 
     private let authService: AuthService
 
+    /// Taps on the version label, counted toward the diagnostic logging switch.
+    private var versionTapCount = 0
+
     // MARK: - Color Palette (matches app theme)
     private let colorDeepPurple = UIColor(red: 0x1A / 255.0, green: 0x0A / 255.0, blue: 0x2E / 255.0, alpha: 1.0)
     private let colorDarkVoid = UIColor(red: 0x0D / 255.0, green: 0x02 / 255.0, blue: 0x21 / 255.0, alpha: 1.0)
@@ -1144,6 +1180,7 @@ class AccountSettingsSheet: UIViewController {
     // Tag constants for themed text fields
     private static let emailFieldTag = 100
     private static let passwordFieldTag = 101
+    private static let usernameFieldTag = 102
 
     init(authService: AuthService) {
         self.authService = authService
@@ -1492,28 +1529,56 @@ class AccountSettingsSheet: UIViewController {
             emailStack.bottomAnchor.constraint(equalTo: emailCard.bottomAnchor, constant: -16),
         ])
 
-        let themedEmail = makeThemedTextField(placeholder: "Email", tag: Self.emailFieldTag)
-        themedEmail.keyboardType = .emailAddress
+        if currentMode == .createAccount {
+            emailStack.addArrangedSubview(makeThemedTextField(placeholder: "Username", tag: Self.usernameFieldTag))
+        }
+
+        let themedEmail = makeThemedTextField(
+            placeholder: currentMode == .signIn ? "Email or username" : "Email",
+            tag: Self.emailFieldTag
+        )
+        themedEmail.keyboardType = currentMode == .signIn ? .default : .emailAddress
         emailStack.addArrangedSubview(themedEmail)
 
         let themedPassword = makeThemedTextField(placeholder: "Password", isSecure: true, tag: Self.passwordFieldTag)
         emailStack.addArrangedSubview(themedPassword)
 
-        // "Forgot Password?" link — only in sign-in mode
         if currentMode == .signIn {
-            let forgotButton = UIButton(type: .system)
-            forgotButton.setTitle("Forgot Password?", for: .normal)
-            forgotButton.titleLabel?.font = roundedFont(size: 14, weight: .medium)
-            forgotButton.setTitleColor(colorNeonCyan, for: .normal)
-            forgotButton.contentHorizontalAlignment = .trailing
-            forgotButton.addTarget(self, action: #selector(handleForgotPassword), for: .touchUpInside)
-            emailStack.addArrangedSubview(forgotButton)
+            let forgotRow = UIStackView()
+            forgotRow.axis = .horizontal
+            forgotRow.distribution = .fillEqually
+
+            let forgotPassword = UIButton(type: .system)
+            forgotPassword.setTitle("Forgot password?", for: .normal)
+            forgotPassword.titleLabel?.font = roundedFont(size: 14, weight: .medium)
+            forgotPassword.setTitleColor(colorNeonCyan, for: .normal)
+            forgotPassword.contentHorizontalAlignment = .leading
+            forgotPassword.addTarget(self, action: #selector(handleForgotPassword), for: .touchUpInside)
+            forgotRow.addArrangedSubview(forgotPassword)
+
+            let forgotUsername = UIButton(type: .system)
+            forgotUsername.setTitle("Forgot username?", for: .normal)
+            forgotUsername.titleLabel?.font = roundedFont(size: 14, weight: .medium)
+            forgotUsername.setTitleColor(colorNeonCyan, for: .normal)
+            forgotUsername.contentHorizontalAlignment = .trailing
+            forgotUsername.addTarget(self, action: #selector(handleForgotUsername), for: .touchUpInside)
+            forgotRow.addArrangedSubview(forgotUsername)
+            emailStack.addArrangedSubview(forgotRow)
         }
 
         let actionTitle = currentMode == .signIn ? "Sign In" : "Create Account"
         let actionSelector = currentMode == .signIn ? #selector(handleEmailSignIn) : #selector(handleEmailSignUp)
         let actionButton = makeNeonButton(title: actionTitle, color: colorNeonPink, action: actionSelector)
         emailStack.addArrangedSubview(actionButton)
+
+        if currentMode == .signIn {
+            let magicButton = UIButton(type: .system)
+            magicButton.setTitle("Email me a sign-in link", for: .normal)
+            magicButton.titleLabel?.font = roundedFont(size: 14, weight: .medium)
+            magicButton.setTitleColor(colorNeonYellow, for: .normal)
+            magicButton.addTarget(self, action: #selector(handleMagicLink), for: .touchUpInside)
+            emailStack.addArrangedSubview(magicButton)
+        }
 
         contentStack.addArrangedSubview(emailCard)
 
@@ -1583,6 +1648,17 @@ class AccountSettingsSheet: UIViewController {
         emailLabel.textColor = .white
         emailLabel.textAlignment = .center
         infoStack.addArrangedSubview(emailLabel)
+
+        let usernameLabel = UILabel()
+        if let username = authService.currentUsername, !username.isEmpty {
+            usernameLabel.text = "@\(username)"
+        } else {
+            usernameLabel.text = "No username yet"
+        }
+        usernameLabel.font = roundedFont(size: 15, weight: .medium)
+        usernameLabel.textColor = colorNeonCyan
+        usernameLabel.textAlignment = .center
+        infoStack.addArrangedSubview(usernameLabel)
 
         // Fetch email if not cached
         if authService.currentEmail == nil {
@@ -1680,6 +1756,12 @@ class AccountSettingsSheet: UIViewController {
         ])
 
         actionsStack.addArrangedSubview(makeActionRow(
+            icon: "at", title: authService.currentUsername == nil ? "Set Username" : "Change Username",
+            color: colorNeonCyan,
+            action: #selector(handleSetUsername)
+        ))
+        actionsStack.addArrangedSubview(makeRowSeparator())
+        actionsStack.addArrangedSubview(makeActionRow(
             icon: "key.fill", title: "Change Password", color: colorNeonCyan,
             action: #selector(handleChangePassword)
         ))
@@ -1724,7 +1806,40 @@ class AccountSettingsSheet: UIViewController {
         versionLabel.font = roundedFont(size: 12, weight: .regular)
         versionLabel.textColor = colorGridPurple.withAlphaComponent(0.5)
         versionLabel.textAlignment = .center
+        // Seven taps reveal the diagnostic logging switch. Kept out of the
+        // normal settings list so players never turn on transcript capture
+        // by accident.
+        versionLabel.isUserInteractionEnabled = true
+        versionLabel.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(handleVersionTap))
+        )
         contentStack.addArrangedSubview(versionLabel)
+    }
+
+    @objc private func handleVersionTap() {
+        versionTapCount += 1
+        guard versionTapCount >= 7 else { return }
+        versionTapCount = 0
+        presentDiagnosticLoggingSwitch()
+    }
+
+    private func presentDiagnosticLoggingSwitch() {
+        let enabled = DiagnosticLog.isEnabled
+        let alert = UIAlertController(
+            title: "Diagnostic Logging",
+            message: enabled
+                ? "Logging is ON. Session detail is being written to files inside the app. Turning it off deletes those files."
+                : "Logging is OFF. Turn it on only while reproducing a problem — it records session detail on this device.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: enabled ? "Turn Off and Delete Logs" : "Turn On",
+            style: enabled ? .destructive : .default
+        ) { _ in
+            DiagnosticLog.setEnabled(!enabled)
+        })
+        present(alert, animated: true)
     }
 
     // MARK: - Actions
@@ -1775,14 +1890,16 @@ class AccountSettingsSheet: UIViewController {
     }
 
     @objc private func handleEmailSignIn() {
-        guard let email = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text, !email.isEmpty,
-              let password = (view.viewWithTag(Self.passwordFieldTag) as? UITextField)?.text, !password.isEmpty else {
-            statusLabel.text = "Please enter email and password"
+        let identifier = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+        let password = (view.viewWithTag(Self.passwordFieldTag) as? UITextField)?.text ?? ""
+        let validation = AuthAccountPolicy.validateSignIn(.init(identifier: identifier, password: password))
+        guard validation.isValid else {
+            statusLabel.text = validation.message
             return
         }
         statusLabel.text = nil
         activityIndicator.startAnimating()
-        authService.signInWithEmail(email: email, password: password) { [weak self] success, error in
+        authService.signInWithIdentifier(identifier: identifier, password: password) { [weak self] success, error in
             self?.activityIndicator.stopAnimating()
             if success {
                 self?.dismiss(animated: true)
@@ -1793,18 +1910,19 @@ class AccountSettingsSheet: UIViewController {
     }
 
     @objc private func handleEmailSignUp() {
-        guard let email = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text, !email.isEmpty,
-              let password = (view.viewWithTag(Self.passwordFieldTag) as? UITextField)?.text, !password.isEmpty else {
-            statusLabel.text = "Please enter email and password"
-            return
-        }
-        guard password.count >= 6 else {
-            statusLabel.text = "Password must be at least 6 characters"
+        let username = (view.viewWithTag(Self.usernameFieldTag) as? UITextField)?.text ?? ""
+        let email = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+        let password = (view.viewWithTag(Self.passwordFieldTag) as? UITextField)?.text ?? ""
+        let validation = AuthAccountPolicy.validateCreateAccount(
+            .init(username: username, email: email, password: password)
+        )
+        guard validation.isValid else {
+            statusLabel.text = validation.message
             return
         }
         statusLabel.text = nil
         activityIndicator.startAnimating()
-        authService.signUpWithEmail(email: email, password: password) { [weak self] success, error in
+        authService.signUpWithEmail(email: email, password: password, username: username) { [weak self] success, error in
             self?.activityIndicator.stopAnimating()
             if success {
                 self?.dismiss(animated: true)
@@ -1815,44 +1933,145 @@ class AccountSettingsSheet: UIViewController {
     }
 
     @objc private func handleForgotPassword() {
-        let emailText = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+        let identifier = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+        let alert = UIAlertController(
+            title: "Reset Password",
+            message: "Enter the email or username on the account. We'll send a reset link if it exists.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "Email or username"
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+            field.text = identifier
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Send Reset Link", style: .default) { [weak self] _ in
+            guard let value = alert.textFields?.first?.text else { return }
+            self?.performPasswordReset(identifier: value)
+        })
+        present(alert, animated: true)
+    }
 
-        if emailText.isEmpty {
-            let alert = UIAlertController(
-                title: "Reset Password",
-                message: "Enter your email address to receive a password reset link.",
-                preferredStyle: .alert
-            )
-            alert.addTextField { field in
-                field.placeholder = "Email address"
-                field.keyboardType = .emailAddress
-                field.autocapitalizationType = .none
-            }
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            alert.addAction(UIAlertAction(title: "Send Reset Link", style: .default) { [weak self] _ in
-                guard let email = alert.textFields?.first?.text, !email.isEmpty else { return }
-                self?.performPasswordReset(email: email)
-            })
-            present(alert, animated: true)
-        } else {
-            performPasswordReset(email: emailText)
+    private func performPasswordReset(identifier: String) {
+        let validation = AuthAccountPolicy.validateForgotPassword(identifier: identifier)
+        guard validation.isValid else {
+            statusLabel.textColor = colorNeonOrange
+            statusLabel.text = validation.message
+            return
+        }
+        activityIndicator.startAnimating()
+        statusLabel.text = nil
+        authService.requestPasswordReset(identifier: identifier) { [weak self] success, message in
+            self?.activityIndicator.stopAnimating()
+            self?.statusLabel.textColor = success ? self?.colorNeonGreen : self?.colorNeonOrange
+            self?.statusLabel.text = message ?? (success
+                ? AuthAccountPolicy.recoveryAcknowledgement(for: .forgotPassword)
+                : "Failed to send reset link")
         }
     }
 
-    private func performPasswordReset(email: String) {
-        activityIndicator.startAnimating()
-        statusLabel.text = nil
-
-        authService.sendPasswordReset(email: email) { [weak self] success, error in
-            self?.activityIndicator.stopAnimating()
-            if success {
-                self?.statusLabel.textColor = self?.colorNeonGreen
-                self?.statusLabel.text = "Password reset link sent! Check your email."
-            } else {
-                self?.statusLabel.textColor = self?.colorNeonOrange
-                self?.statusLabel.text = error ?? "Failed to send reset link"
-            }
+    @objc private func handleForgotUsername() {
+        let emailHint = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+        let alert = UIAlertController(
+            title: "Forgot Username",
+            message: "Enter the email on the account. We'll send a reminder and a sign-in link if it exists.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "Email address"
+            field.keyboardType = .emailAddress
+            field.autocapitalizationType = .none
+            if emailHint.contains("@") { field.text = emailHint }
         }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Send Reminder", style: .default) { [weak self] _ in
+            guard let email = alert.textFields?.first?.text else { return }
+            self?.performUsernameReminder(email: email)
+        })
+        present(alert, animated: true)
+    }
+
+    private func performUsernameReminder(email: String) {
+        let validation = AuthAccountPolicy.validateForgotUsername(email: email)
+        guard validation.isValid else {
+            statusLabel.textColor = colorNeonOrange
+            statusLabel.text = validation.message
+            return
+        }
+        activityIndicator.startAnimating()
+        authService.requestUsernameReminder(email: email) { [weak self] success, message in
+            self?.activityIndicator.stopAnimating()
+            self?.statusLabel.textColor = success ? self?.colorNeonGreen : self?.colorNeonOrange
+            self?.statusLabel.text = message ?? (success
+                ? AuthAccountPolicy.recoveryAcknowledgement(for: .forgotUsername)
+                : "Failed to send reminder")
+        }
+    }
+
+    @objc private func handleMagicLink() {
+        let emailHint = (view.viewWithTag(Self.emailFieldTag) as? UITextField)?.text ?? ""
+        let alert = UIAlertController(
+            title: "Email Sign-In Link",
+            message: "Enter your email and we'll send a magic link.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "Email address"
+            field.keyboardType = .emailAddress
+            field.autocapitalizationType = .none
+            if emailHint.contains("@") { field.text = emailHint }
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Send Link", style: .default) { [weak self] _ in
+            guard let email = alert.textFields?.first?.text else { return }
+            let validation = AuthAccountPolicy.validateMagicLink(email: email)
+            guard validation.isValid else {
+                self?.statusLabel.text = validation.message
+                return
+            }
+            self?.activityIndicator.startAnimating()
+            self?.authService.sendMagicLink(email: email) { success, message in
+                self?.activityIndicator.stopAnimating()
+                self?.statusLabel.textColor = success ? self?.colorNeonGreen : self?.colorNeonOrange
+                self?.statusLabel.text = message ?? (success
+                    ? AuthAccountPolicy.recoveryAcknowledgement(for: .magicLink)
+                    : "Failed to send sign-in link")
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    @objc private func handleSetUsername() {
+        let alert = UIAlertController(
+            title: authService.currentUsername == nil ? "Set Username" : "Change Username",
+            message: "3–20 characters. Letters, numbers, and underscores. This is how you can sign in if you forget your email.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { [weak self] field in
+            field.placeholder = "username"
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+            field.text = self?.authService.currentUsername
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            guard let username = alert.textFields?.first?.text else { return }
+            self?.authService.setUsername(username) { success, error in
+                if success {
+                    self?.buildAuthenticatedUI()
+                } else {
+                    let fail = UIAlertController(
+                        title: "Username not saved",
+                        message: error ?? "Try a different username.",
+                        preferredStyle: .alert
+                    )
+                    fail.addAction(UIAlertAction(title: "OK", style: .default))
+                    self?.present(fail, animated: true)
+                }
+            }
+        })
+        present(alert, animated: true)
     }
 
     @objc private func handleChangePassword() {
@@ -1978,12 +2197,17 @@ extension AccountSettingsSheet: ASAuthorizationControllerDelegate {
 
 extension AccountSettingsSheet: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        if textField.tag == Self.emailFieldTag {
-            // Move to password field
+        if textField.tag == Self.usernameFieldTag {
+            view.viewWithTag(Self.emailFieldTag)?.becomeFirstResponder()
+        } else if textField.tag == Self.emailFieldTag {
             view.viewWithTag(Self.passwordFieldTag)?.becomeFirstResponder()
         } else {
-            // Dismiss keyboard and trigger sign-in
             textField.resignFirstResponder()
+            if currentMode == .signIn {
+                handleEmailSignIn()
+            } else {
+                handleEmailSignUp()
+            }
         }
         return true
     }

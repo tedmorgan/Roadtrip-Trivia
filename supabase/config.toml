@@ -17,8 +17,29 @@ verify_jwt = false
 [functions.grok-token]
 verify_jwt = false
 
+# Platform verify_jwt only accepts legacy HS256 tokens. ES256 access tokens
+# are rejected at the gateway (UNAUTHORIZED_ASYMMETRIC_JWT) before the
+# function runs. These two check the token with Auth inside the handler.
 [functions.gemini-live-token]
-verify_jwt = true
+verify_jwt = false
 
 [functions.gemini-question-batch]
-verify_jwt = true
+verify_jwt = false
+
+[functions.account-recovery]
+verify_jwt = false
+
+[functions.admin-console]
+verify_jwt = false
+
+[auth]
+site_url = "roadtriptrivia://auth/callback"
+additional_redirect_urls = ["roadtriptrivia://auth/callback"]
+
+[auth.email.template.magic_link]
+subject = "Your Roadtrip Trivia account"
+content_path = "./supabase/templates/magic-link.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Roadtrip Trivia password"
+content_path = "./supabase/templates/recovery.html"

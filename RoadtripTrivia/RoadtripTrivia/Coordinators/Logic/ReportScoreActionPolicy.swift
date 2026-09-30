@@ -47,6 +47,10 @@ public enum ReportScoreOutcome: Equatable {
     /// drive the farewell as a chunked sequence; the AI should
     /// acknowledge quietly and wait.
     case roundCompleteNoRoundsLeft
+
+    /// Lightning timer already expired. Score this answer only — TIME IS UP
+    /// owns wrap-up so we must not also ask continue or fetch Q8.
+    case lightningTimeUp
 }
 
 public enum ReportScoreActionPolicy {
@@ -55,21 +59,32 @@ public enum ReportScoreActionPolicy {
     ///
     /// - Parameters:
     ///   - questionIndex: 1-based question number within the round (or
-    ///     within the lightning round). Standard rounds end at 5.
-    ///   - isLightningRound: lightning rounds never have a 5-question
+    ///     within the lightning round). Standard rounds end at
+    ///     `questionsInRound` (usually 5).
+    ///   - isLightningRound: lightning rounds never have a question-count
     ///     completion boundary; they end on timer expiry instead.
     ///   - canPlayRound: dynamic check from `RoundTracker.shared` —
     ///     true if the player still has rounds available *after* the
     ///     current round was consumed.
     ///   - roundsLeftAfterScoring: post-consumption value of
     ///     `RoundTracker.shared.totalRoundsAvailable`. Should be ≥ 0.
+    ///   - lightningTimedOut: timer already expired; do not treat Q5+ as
+    ///     a standard round-complete continue prompt.
+    ///   - questionsInRound: scored questions in this standard round after
+    ///     near-dup filtering.
     public static func decide(
         questionIndex: Int,
         isLightningRound: Bool,
         canPlayRound: Bool,
-        roundsLeftAfterScoring: Int
+        roundsLeftAfterScoring: Int,
+        lightningTimedOut: Bool = false,
+        questionsInRound: Int = 5
     ) -> ReportScoreOutcome {
-        let isRoundComplete = questionIndex >= 5 && !isLightningRound
+        if lightningTimedOut {
+            return .lightningTimeUp
+        }
+        let limit = max(questionsInRound, 1)
+        let isRoundComplete = questionIndex >= limit && !isLightningRound
         guard isRoundComplete else { return .midRound }
         if !canPlayRound {
             return .roundCompleteNoRoundsLeft
@@ -97,7 +112,10 @@ public enum ReportScoreActionPolicy {
             """
 
         case .roundCompleteNoRoundsLeft:
-            return "LAST available round finished. App drives farewell — acknowledge quietly and wait. Do NOT call end_game. Do NOT call get_next_question. Do NOT ask if they want to play again."
+            return "LAST available round finished. Do NOT speak. The app will speak the verdict and the farewell. Do NOT call end_game. Do NOT call get_next_question. Do NOT ask if they want to play again."
+
+        case .lightningTimeUp:
+            return "Lightning TIME IS UP is already being announced. Record this score only. Do NOT ask another question. Do NOT ask if they want to continue. Do NOT recap the round. Do NOT call get_next_question."
         }
     }
 }

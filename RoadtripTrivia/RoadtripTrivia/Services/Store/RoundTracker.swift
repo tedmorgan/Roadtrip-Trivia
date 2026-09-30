@@ -20,6 +20,8 @@ class RoundTracker: ObservableObject {
     private let kPurchasedRounds        = "rt_purchasedRounds"
     private let kSubscriptionRoundsUsed = "rt_subscriptionRoundsUsed"
     private let kPeriodStartDate        = "rt_periodStartDate"
+    private let kCompensationUser       = "rt_compensationUser"
+    private let kCompensationApplied    = "rt_compensationApplied"
 
     // MARK: - Published State
 
@@ -210,5 +212,48 @@ class RoundTracker: ObservableObject {
         let total = totalRoundsAvailable
         if total == 0 { return "No rounds" }
         return "\(total) round\(total == 1 ? "" : "s") available"
+    }
+
+    // MARK: - Support credits / refund clawback
+
+    /// Apply the server-side customer-support ledger. Credits add purchased
+    /// rounds; refund clawbacks remove unused purchased rounds. Switching
+    /// accounts reverses the previous user's compensation so it cannot leak.
+    func syncCompensationRounds(userId: String, granted: Int, clawedBack: Int) {
+        let net = AuthAccountPolicy.compensationNet(granted: granted, clawedBack: clawedBack)
+        if let previousUser = defaults.string(forKey: kCompensationUser), previousUser != userId {
+            reverseAppliedCompensation()
+        }
+        let applied = defaults.string(forKey: kCompensationUser) == userId
+            ? defaults.integer(forKey: kCompensationApplied)
+            : 0
+        let delta = net - applied
+        if delta > 0 {
+            addPurchasedRounds(delta)
+        } else if delta < 0 {
+            let reduce = min(-delta, purchasedRoundsRemaining)
+            defaults.set(purchasedRoundsRemaining - reduce, forKey: kPurchasedRounds)
+            refreshCanPlay()
+            print("[RoundTracker] Clawed back \(reduce) support rounds")
+        }
+        defaults.set(userId, forKey: kCompensationUser)
+        defaults.set(net, forKey: kCompensationApplied)
+    }
+
+    /// Reverse support credits when the player signs out.
+    func clearAccountCompensation() {
+        reverseAppliedCompensation()
+        defaults.removeObject(forKey: kCompensationUser)
+        defaults.set(0, forKey: kCompensationApplied)
+        refreshCanPlay()
+    }
+
+    private func reverseAppliedCompensation() {
+        let applied = defaults.integer(forKey: kCompensationApplied)
+        guard applied > 0 else { return }
+        let reduce = min(applied, purchasedRoundsRemaining)
+        defaults.set(purchasedRoundsRemaining - reduce, forKey: kPurchasedRounds)
+        defaults.set(0, forKey: kCompensationApplied)
+        print("[RoundTracker] Reversed \(reduce) support rounds for account switch")
     }
 }

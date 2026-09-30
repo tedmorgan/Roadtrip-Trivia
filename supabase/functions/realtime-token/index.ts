@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireUser } from "../_shared/requireUser.ts";
 
 /// Mints an ephemeral client token for the OpenAI Realtime API.
 /// The permanent OPENAI_API_KEY never leaves the server.
@@ -14,6 +15,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const caller = await requireUser(req);
+    if (!("id" in caller)) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required", detail: caller.error }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiApiKey) {
       throw new Error("OPENAI_API_KEY not configured");

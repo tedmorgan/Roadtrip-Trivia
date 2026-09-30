@@ -79,6 +79,15 @@ public enum EndGamePolicy {
             return .honor
         }
 
+        // (2b) The host already asked once ("want to keep playing?" /
+        // "continue or stop?"). This end_game is the answer. Honor it
+        // even inside the lightning race window — 2026-09-29 the race
+        // reject plus a second confirmation made the host ask three
+        // times while the player kept saying no.
+        if endGameConfirmationPending {
+            return .honor
+        }
+
         // (3) Lightning-timer race window — auto-reject without asking
         // the player. The AI queued end_game before it processed our
         // "move to next round" instruction.

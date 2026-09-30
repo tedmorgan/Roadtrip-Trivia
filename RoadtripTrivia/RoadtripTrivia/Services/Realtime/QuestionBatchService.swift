@@ -37,7 +37,8 @@ final class QuestionBatchService {
         return docs.appendingPathComponent("debug-f3b222.log").path
     }()
     static func _batchLog(_ hyp: String, _ loc: String, _ msg: String, _ data: [String: Any]) {
-        let entry: [String: Any] = ["sessionId":"f3b222","hypothesisId":hyp,"location":loc,"message":msg,"data":data,"timestamp":Date().timeIntervalSince1970 * 1000]
+        guard DiagnosticLog.isEnabled else { return }
+        let entry: [String: Any] = ["sessionId":"f3b222","hypothesisId":hyp,"location":loc,"message":msg,"data":DiagnosticLog.redactingSensitiveKeys(data),"timestamp":Date().timeIntervalSince1970 * 1000]
         if let json = try? JSONSerialization.data(withJSONObject: entry), var line = String(data: json, encoding: .utf8) {
             line += "\n"
             if let fh = FileHandle(forWritingAtPath: _batchLogPath) {
@@ -74,10 +75,11 @@ final class QuestionBatchService {
                     attempt: attempt
                 )
                 let shuffled = Self.shuffleAnswerPositions(batch)
-                currentBatch = shuffled
+                let filtered = Self.droppingHistoryDuplicates(shuffled, history: questionHistory)
+                currentBatch = filtered
                 roundCursor = 0
                 questionCursor = 0
-                return shuffled
+                return filtered
             } catch {
                 lastError = error
                 if attempt == 1 {
@@ -100,7 +102,7 @@ final class QuestionBatchService {
         guard let url = URL(string: "\(supabaseURL)/gemini-question-batch") else {
             throw BatchError.invalidURL
         }
-        guard let accessToken = AuthService.shared.currentToken, !accessToken.isEmpty else {
+        guard let accessToken = await AuthService.shared.accessTokenForRequests(), !accessToken.isEmpty else {
             throw BatchError.authenticationRequired
         }
 
@@ -157,6 +159,22 @@ final class QuestionBatchService {
         return (round, q, idx)
     }
 
+    /// Look at the next question without advancing the cursor.
+    func peekNextQuestion() -> (round: BatchRound, question: BatchQuestion, questionIndex: Int)? {
+        guard let batch = currentBatch else { return nil }
+        var roundIndex = roundCursor
+        var questionIndex = questionCursor
+        while roundIndex < batch.rounds.count {
+            let round = batch.rounds[roundIndex]
+            if questionIndex < round.questions.count {
+                return (round, round.questions[questionIndex], questionIndex + 1)
+            }
+            roundIndex += 1
+            questionIndex = 0
+        }
+        return nil
+    }
+
     var hasMoreQuestions: Bool {
         guard let batch = currentBatch else { return false }
         if roundCursor >= batch.rounds.count { return false }
@@ -183,61 +201,76 @@ final class QuestionBatchService {
         }
     }
 
+    /// Skip leftover questions in the current round (lightning TIME IS UP)
+    /// so the next `get_next_question` peeks at the following round.
+    func skipRemainingQuestionsInCurrentRound() {
+        guard let batch = currentBatch, roundCursor < batch.rounds.count else { return }
+        let round = batch.rounds[roundCursor]
+        if questionCursor >= round.questions.count { return }
+        roundCursor += 1
+        questionCursor = 0
+    }
+
     func reset() {
         currentBatch = nil
         roundCursor = 0
         questionCursor = 0
     }
 
-    // MARK: - Answer Position Shuffling
+    // MARK: - History Dedup
 
-    /// Redistribute correct answer positions to avoid A/B bias from the LLM.
-    private static func shuffleAnswerPositions(_ batch: QuestionBatch) -> QuestionBatch {
+    static func droppingHistoryDuplicates(_ batch: QuestionBatch, history: [String]) -> QuestionBatch {
+        var seen = history
         let newRounds = batch.rounds.map { round -> BatchRound in
-            let newQuestions = round.questions.map { q -> BatchQuestion in
-                guard let options = q.options, options.count == 4 else { return q }
-                guard let correctLetter = q.correctAnswer.first,
-                      let correctIdx = letterToIndex(correctLetter) else { return q }
-                guard correctIdx < options.count else { return q }
-
-                let targetIdx = Int.random(in: 0..<4)
-                if targetIdx == correctIdx { return q }
-
-                var shuffled = options
-                shuffled.swapAt(correctIdx, targetIdx)
-
-                // Relabel A/B/C/D prefixes
-                let labels = ["A", "B", "C", "D"]
-                let relabeled = shuffled.enumerated().map { i, opt -> String in
-                    let stripped = stripLetterPrefix(opt)
-                    return "\(labels[i]): \(stripped)"
-                }
-
-                let newAnswer = labels[targetIdx]
-                return BatchQuestion(questionText: q.questionText, options: relabeled, correctAnswer: newAnswer)
-            }
-            return BatchRound(roundNumber: round.roundNumber, category: round.category,
-                              isLightning: round.isLightning, questions: newQuestions)
+            let keepAtLeast = round.isLightning ? 6 : 5
+            let kept = QuestionDedupPolicy.filterQuestions(
+                round.questions,
+                text: { $0.questionText },
+                history: seen,
+                keepAtLeast: keepAtLeast
+            )
+            seen.append(contentsOf: kept.map(\.questionText))
+            return BatchRound(
+                roundNumber: round.roundNumber,
+                category: round.category,
+                isLightning: round.isLightning,
+                questions: kept
+            )
         }
         return QuestionBatch(rounds: newRounds)
     }
 
-    private static func letterToIndex(_ c: Character) -> Int? {
-        switch c.uppercased() {
-        case "A": return 0; case "B": return 1; case "C": return 2; case "D": return 3
-        default: return nil
-        }
-    }
+    // MARK: - Answer Position Shuffling
 
-    private static func stripLetterPrefix(_ option: String) -> String {
-        let trimmed = option.trimmingCharacters(in: .whitespaces)
-        if trimmed.count >= 3 && trimmed[trimmed.index(trimmed.startIndex, offsetBy: 1)] == ":" {
-            return String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+    /// Spread correct-answer letters across A–D. The generator parks the key
+    /// on D; a balanced deck is applied per round so a round cannot come out
+    /// all D.
+    private static func shuffleAnswerPositions(_ batch: QuestionBatch) -> QuestionBatch {
+        var rng = SystemRandomNumberGenerator()
+        let newRounds = batch.rounds.map { round -> BatchRound in
+            let input = round.questions.map {
+                AnswerPositionPolicy.Question(
+                    questionText: $0.questionText,
+                    options: $0.options,
+                    correctAnswer: $0.correctAnswer
+                )
+            }
+            let shuffled = AnswerPositionPolicy.redistribute(input, random: &rng)
+            let questions = shuffled.map {
+                BatchQuestion(
+                    questionText: $0.questionText,
+                    options: $0.options,
+                    correctAnswer: $0.correctAnswer
+                )
+            }
+            return BatchRound(
+                roundNumber: round.roundNumber,
+                category: round.category,
+                isLightning: round.isLightning,
+                questions: questions
+            )
         }
-        if trimmed.count >= 4 && trimmed[trimmed.index(trimmed.startIndex, offsetBy: 1)] == "." {
-            return String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-        }
-        return trimmed
+        return QuestionBatch(rounds: newRounds)
     }
 
     // MARK: - Errors

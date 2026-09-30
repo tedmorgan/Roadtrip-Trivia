@@ -31,6 +31,18 @@ final class PostScoreWatchdogPolicyTests: XCTestCase {
 
     // MARK: - Re-arm cases
 
+    func test_reArmsWhileVerdictPlaybackIsStillDraining() {
+        let action = PostScoreWatchdogPolicy.decide(
+            sessionAlive: true,
+            pendingNoRoundsEnd: false,
+            phase: .listening,
+            secondsSinceLastAudioDelta: 3,
+            reason: .continuation,
+            playbackStillDraining: true
+        )
+        XCTAssertEqual(action, .reArm(reason: "host playback still draining"))
+    }
+
     func test_reArmsWhenHostIsSpeaking() {
         // Don't interrupt an ongoing turn — let it finish.
         let action = PostScoreWatchdogPolicy.decide(
@@ -177,6 +189,21 @@ final class PostScoreWatchdogPolicyTests: XCTestCase {
                 XCTFail("tool activity \(gap)s ago should re-arm (model still composing), got \(action)")
             }
         }
+    }
+
+    /// 2026-09-24 Science Q2: host audio had already been gone for 26s, but
+    /// report_score was only 7s old, so the tool-quiet guard re-armed and
+    /// the player heard nothing. A long finite silence must fire.
+    func test_longFiniteSilenceFiresEvenIfScoreIsRecent() {
+        let action = PostScoreWatchdogPolicy.decide(
+            sessionAlive: true,
+            pendingNoRoundsEnd: false,
+            phase: .listening,
+            secondsSinceLastAudioDelta: 25.7,
+            reason: .armed,
+            secondsSinceLastToolEvent: 7.3
+        )
+        XCTAssertEqual(action, .fireHard)
     }
 
     func test_toolQuietWindowIsConfigurable() {

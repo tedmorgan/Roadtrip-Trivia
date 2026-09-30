@@ -14,7 +14,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { chatCompletion } from "../_shared/openai.ts";
-import { checkRateLimit, extractUserId } from "../_shared/ratelimit.ts";
+import { checkRateLimit } from "../_shared/ratelimit.ts";
+import { requireUser } from "../_shared/requireUser.ts";
 
 interface GradeRequest {
   question: string;
@@ -31,23 +32,34 @@ serve(async (req: Request) => {
 
   try {
     // Rate limiting (COST-05)
-    const userId = extractUserId(req);
-    if (userId) {
-      const limit = await checkRateLimit(userId, "grade");
-      if (!limit.allowed) {
-        return new Response(JSON.stringify({ error: limit.message }), {
+    // The caller's token is verified against Auth, not just decoded:
+    // a decoded `sub` can be forged, and an unauthenticated caller used
+    // to skip the daily limit entirely.
+    const caller = await requireUser(req);
+    if (!("id" in caller)) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required", detail: caller.error }),
+        {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 429,
-        });
-      }
+          status: 401,
+        },
+      );
+    }
+    const limit = await checkRateLimit(caller.id, "grade");
+    if (!limit.allowed) {
+      return new Response(JSON.stringify({ error: limit.message }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 429,
+      });
     }
 
     const body: GradeRequest = await req.json();
     const { question, correctAnswer, playerAnswer, gradingRubric, difficulty } =
       body;
 
+    // Answer text stays out of the function log.
     console.log(
-      `[grade-answer] Grading: "${playerAnswer}" vs "${correctAnswer}" (${difficulty} strictness)`
+      `[grade-answer] Grading answer (${difficulty} strictness)`
     );
 
     // For very obvious matches, skip GPT call entirely (cost savings)

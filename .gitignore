@@ -44,3 +44,9 @@ node_modules/
 .swiftpm/
 .swiftpm-cache/
 Package.resolved
+
+# Diagnostic captures pulled off a test device. These hold spoken
+# transcripts, player answers, team names, and Supabase user ids, so
+# they must never reach the repository.
+device-logs/
+*.log

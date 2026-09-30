@@ -5,7 +5,7 @@ final class GeminiLiveCodecTests: XCTestCase {
     private func config() -> SessionConfig {
         SessionConfig(
             instructions: "Host the game. [APP_CONTROL] is app-owned.",
-            voice: "Puck",
+            voice: "Orus",
             tools: [
                 RealtimeTool(
                     name: "get_next_question",
@@ -32,7 +32,7 @@ final class GeminiLiveCodecTests: XCTestCase {
         let speech = try XCTUnwrap(generation["speechConfig"] as? [String: Any])
         let voiceConfig = try XCTUnwrap(speech["voiceConfig"] as? [String: Any])
         let prebuilt = try XCTUnwrap(voiceConfig["prebuiltVoiceConfig"] as? [String: Any])
-        XCTAssertEqual(prebuilt["voiceName"] as? String, "Puck")
+        XCTAssertEqual(prebuilt["voiceName"] as? String, "Orus")
 
         let tools = try XCTUnwrap(setup["tools"] as? [[String: Any]])
         let declarations = try XCTUnwrap(

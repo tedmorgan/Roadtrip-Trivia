@@ -1,0 +1,5 @@
+<h2>Your Roadtrip Trivia account</h2>
+<p>Email: {{ .Email }}</p>
+<p>Username: {{ if .Data.username }}{{ .Data.username }}{{ else }}not set. Sign in with your email.{{ end }}</p>
+<p><a href="{{ .ConfirmationURL }}">Open Roadtrip Trivia</a></p>
+<p>Open that link on the iPhone where the app is installed. It signs you in. The link expires shortly.</p>
